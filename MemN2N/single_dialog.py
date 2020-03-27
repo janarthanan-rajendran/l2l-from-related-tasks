@@ -23,8 +23,8 @@ tf.flags.DEFINE_integer("embedding_size", 20, "Embedding size for embedding matr
 tf.flags.DEFINE_integer("memory_size", 250, "Maximum size of memory.")
 tf.flags.DEFINE_integer("task_id", 1, "task id, 1 <= id <= 5")
 tf.flags.DEFINE_integer("random_state", None, "Random state.")
-tf.flags.DEFINE_string("data_dir", "../data/personalized-dialog-dataset/full", "Directory containing bAbI tasks")
-tf.flags.DEFINE_string("model_dir", "model/", "Directory containing memn2n model checkpoints")
+tf.flags.DEFINE_string("data_dir", "../data/personalized-dialog-dataset/small", "Directory containing bAbI tasks")
+tf.flags.DEFINE_string("model_dir", "gen/", "Directory containing memn2n model checkpoints")
 tf.flags.DEFINE_boolean('train', True, 'if True, begin to train')
 tf.flags.DEFINE_boolean('OOV', False, 'if True, use OOV test set')
 tf.flags.DEFINE_boolean('save_vocab', False, 'if True, saves vocabulary')
@@ -34,7 +34,7 @@ print("Started Task:", FLAGS.task_id)
 
 
 class chatBot(object):
-    def __init__(self, data_dir, model_dir, task_id,
+    def __init__(self, data_dir, model_dir, result_dir, task_id,
                  OOV=False,
                  memory_size=250,
                  random_state=None,
@@ -89,6 +89,7 @@ class chatBot(object):
         self.data_dir = data_dir
         self.task_id = task_id
         self.model_dir = model_dir
+        self.result_dir = result_dir
         self.OOV = OOV
         self.memory_size = memory_size
         self.random_state = random_state
@@ -133,7 +134,7 @@ class chatBot(object):
         self.saver = tf.train.Saver(max_to_keep=50)
         
         self.summary_writer = tf.summary.FileWriter(
-            self.model.root_dir, self.model.graph_output.graph)
+            self.result_dir, self.model.graph_output.graph)
         
     def build_vocab(self,data,candidates,save=False,load=False):
         """Build vocabulary of words from all dialog data and candidates."""
@@ -283,14 +284,17 @@ class chatBot(object):
         self.sess.close()
 
 if __name__ == '__main__':
-    model_dir = "task" + str(FLAGS.task_id) + "_" + FLAGS.model_dir
+    model_dir = 'model/' + str(FLAGS.task_id) + '/' + FLAGS.model_dir
+    result_dir = 'result/' + str(FLAGS.task_id) + '/' + FLAGS.model_dir
     if not os.path.exists(model_dir):
         os.makedirs(model_dir)
-    chatbot = chatBot(FLAGS.data_dir, model_dir, FLAGS.task_id, OOV=FLAGS.OOV,
+    if not os.path.exists(result_dir):
+        os.makedirs(result_dir)
+    chatbot = chatBot(FLAGS.data_dir, model_dir, result_dir, FLAGS.task_id, OOV=FLAGS.OOV,
                       batch_size=FLAGS.batch_size, memory_size=FLAGS.memory_size,
                       epochs=FLAGS.epochs, hops=FLAGS.hops, save_vocab=FLAGS.save_vocab,
                       load_vocab=FLAGS.load_vocab, learning_rate=FLAGS.learning_rate,
-                      embedding_size=FLAGS.embedding_size)
+                      embedding_size=FLAGS.embedding_size, evaluation_interval=FLAGS.evaluation_interval)
     
     if FLAGS.train:
         chatbot.train()
