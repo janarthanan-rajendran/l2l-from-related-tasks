@@ -239,7 +239,8 @@ class chatBot(object):
 
         Loads best performing model weights based on validation accuracy.
         """
-        ckpt = tf.train.get_checkpoint_state(self.model_dir)
+        model_dir = 'model/' + str(FLAGS.task_id) + '/' + FLAGS.model_dir
+        ckpt = tf.train.get_checkpoint_state(model_dir)
         if ckpt and ckpt.model_checkpoint_path:
             self.saver.restore(self.sess, ckpt.model_checkpoint_path)
         else:
@@ -295,7 +296,7 @@ if __name__ == '__main__':
                       epochs=FLAGS.epochs, hops=FLAGS.hops, save_vocab=FLAGS.save_vocab,
                       load_vocab=FLAGS.load_vocab, learning_rate=FLAGS.learning_rate,
                       embedding_size=FLAGS.embedding_size, evaluation_interval=FLAGS.evaluation_interval)
-    
+
     if FLAGS.train:
         chatbot.train()
     else:
