@@ -121,6 +121,10 @@ class chatBot(object):
         
         self.candidates_vec = vectorize_candidates(
             candidates,self.word_idx,self.candidate_sentence_size)
+
+        if FLAGS.sep_test:
+            _, self.sep_testData, _ = load_dialog_task(
+                FLAGS.test_data_dir, self.task_id, self.candid2indx, self.OOV)
         
         optimizer = tf.train.AdamOptimizer(
             learning_rate=self.learning_rate, epsilon=self.epsilon)
@@ -247,10 +251,15 @@ class chatBot(object):
             self.saver.restore(self.sess, ckpt.model_checkpoint_path)
         else:
             print("...no checkpoint found...")
-       
-        testS, testQ, testA = vectorize_data(
-            self.testData, self.word_idx, self.sentence_size, 
-            self.batch_size, self.n_cand, self.memory_size)
+
+        if FLAGS.sep_test:
+            testS, testQ, testA = vectorize_data(
+                self.sep_testData, self.word_idx, self.sentence_size,
+                self.batch_size, self.n_cand, self.memory_size)
+        else:
+            testS, testQ, testA = vectorize_data(
+                self.testData, self.word_idx, self.sentence_size,
+                self.batch_size, self.n_cand, self.memory_size)
         n_test = len(testS)
         print("Testing Size", n_test)
         
