@@ -62,14 +62,14 @@ for profile in profiles:
                         skip_line = False
                 num += 1
 
-# # checking
-# dialog_count = 0
-# with open(out_data_dir+file_name,'r') as f_out:
-#     out_lines = f_out.readlines()
-#     for line in out_lines:
-#         line = line.strip()
-#         if not line:
-#             dialog_count +=1
-#
-# print(dialog_count)
+# checking
+for profile in profiles:
+    dialog_count = 0
+    with open(out_data_dir + profile + '/' + file_name,'r') as f_out:
+        out_lines = f_out.readlines()
+        for line in out_lines:
+            line = line.strip()
+            if not line:
+                dialog_count +=1
+    print(profile + ': ', dialog_count)
 
