@@ -7,7 +7,7 @@ skip_dialog = True
 profiles = ['female_elderly', 'female_middle-aged','female_young', 'male_elderly','male_middle-aged', 'male_young']
 
 for profile in profiles:
-    with open(in_data_dir + profile + '/' + file_name,'r') as f_in:
+    with open(in_data_dir + file_name,'r') as f_in:
         with open(out_data_dir + profile + '/' + file_name,'a') as f_out:
             in_lines = f_in.readlines()
             u_dialogs = []  # list of dialogs with only user utterances
