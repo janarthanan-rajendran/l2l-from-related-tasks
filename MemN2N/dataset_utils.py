@@ -56,6 +56,40 @@ def vary_data_ratio(in_data_dir, out_data_dir, file_name, train_data_percent, to
                         dialog_count +=1
             print(dialog_count)
 
+def build_mp_sp_data(in_data_dir, out_data_dir, file_name, train_data_percent):
+
+    for data_percent in train_data_percent:
+        print('data percent', data_percent)
+        for profile in profiles:
+            print(profile)
+            with open(in_data_dir + file_name, 'r') as f_in:
+                with open(out_data_dir+'-'+str(data_percent)+ '-mp'+'/'+profile+'/'+file_name, 'a') as f_out:
+                    in_lines = f_in.readlines()
+                    skip_line = True
+                    for line in in_lines:
+                        if not skip_line:
+                            if line.strip():
+                                nid, line = line.split(' ', 1)
+                                nid = int(nid)
+                                f_out.write(str(nid - 1) + ' ' + line)
+                            else:
+                                f_out.write(line)
+                        skip_line = False
+                        line = line.strip()
+                        if not line:
+                            skip_line = True
+
+            # checking
+            dialog_count = 0
+            with open(out_data_dir+'-'+str(data_percent)+ '-mp'+'/'+profile+'/'+file_name, 'r') as f_out:
+                out_lines = f_out.readlines()
+                for line in out_lines:
+                    line = line.strip()
+                    if not line:
+                        dialog_count += 1
+            print(dialog_count)
+
+
 def main(argv):
     if FLAGS.function_name == 'split_by_profile_from_full':
         ## for creating split-by-profile-from-full datasets
@@ -70,6 +104,13 @@ def main(argv):
         train_data_percent = [5, 10, 25]
         total_dialogs = 2000  # 1000 for split-by-profile and 2000 for split-by-profile-from-full
         vary_data_ratio(in_data_dir, out_data_dir, file_name, train_data_percent, total_dialogs)
+    elif FLAGS.function_name == 'build_mp_sp_data':
+        ## combining multi-profile and specific profile data
+        in_data_dir = './../data/personalized-dialog-dataset/full/'
+        out_data_dir = './../data/personalized-dialog-dataset/split-by-profile-from-full'
+        file_name = 'personalized-dialog-task5-full-dialogs-trn.txt'
+        train_data_percent = [5, 10, 25]
+        build_mp_sp_data(in_data_dir, out_data_dir, file_name, train_data_percent)
     else:
         print('function not found!')
 
