@@ -1,4 +1,9 @@
-import numpy as np
+from absl import app
+from absl import flags
+
+FLAGS = flags.FLAGS
+
+flags.DEFINE_string('function_name', 'None', 'create_split_by_profile_from_full')
 
 profiles = ['female_elderly', 'female_middle-aged','female_young', 'male_elderly','male_middle-aged', 'male_young']
 
@@ -51,15 +56,20 @@ def vary_data_ratio(in_data_dir, out_data_dir, file_name, train_data_percent, to
                         dialog_count +=1
             print(dialog_count)
 
-## for creating split-by-profile-from-full datasets
-# data_in_dir = './../data/personalized-dialog-dataset/full/'
-# data_out_dir = './../data/personalized-dialog-dataset/split-by-profile-from-full/'
-# create_split_by_profile_from_full(data_in_dir, data_out_dir)
+def main(argv):
+    if FLAGS.function_name == 'split_by_profile_from_full':
+        ## for creating split-by-profile-from-full datasets
+        data_in_dir = './../data/personalized-dialog-dataset/full/'
+        data_out_dir = './../data/personalized-dialog-dataset/split-by-profile-from-full/'
+        create_split_by_profile_from_full(data_in_dir, data_out_dir)
+    elif FLAGS.function_name == 'vary_data_ratio':
+        ## for creating datasets with different proportion of training data
+        in_data_dir = './../data/personalized-dialog-dataset/split-by-profile-from-full/'
+        out_data_dir = './../data/personalized-dialog-dataset/split-by-profile-from-full'
+        file_name = 'personalized-dialog-task5-full-dialogs-trn.txt'
+        train_data_percent = [5, 10, 25]
+        total_dialogs = 2000  # 1000 for split-by-profile and 2000 for split-by-profile-from-full
+        vary_data_ratio(in_data_dir, out_data_dir, file_name, train_data_percent, total_dialogs)
 
-## for creating datasets with different proportion of training data
-in_data_dir = './../data/personalized-dialog-dataset/split-by-profile-from-full/'
-out_data_dir = './../data/personalized-dialog-dataset/split-by-profile-from-full'
-file_name = 'personalized-dialog-task5-full-dialogs-trn.txt'
-train_data_percent = [5, 10, 25]
-total_dialogs = 2000  # 1000 for split-by-profile and 2000 for split-by-profile-from-full
-vary_data_ratio(in_data_dir, out_data_dir, file_name, train_data_percent, total_dialogs)
+if __name__ == '__main__':
+    app.run(main)
