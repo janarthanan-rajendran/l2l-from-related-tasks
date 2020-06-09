@@ -8,26 +8,29 @@ flags.DEFINE_string('function_name', 'None', 'create_split_by_profile_from_full'
 profiles = ['female_elderly', 'female_middle-aged','female_young', 'male_elderly','male_middle-aged', 'male_young']
 
 def create_split_by_profile_from_full(data_in_dir, data_out_dir):
-    trn_filename = 'personalized-dialog-task5-full-dialogs-trn.txt'
+    filenames = ['personalized-dialog-task5-full-dialogs-trn.txt', 'personalized-dialog-task5-full-dialogs-dev.txt',
+                 'personalized-dialog-task5-full-dialogs-tst.txt', 'personalized-dialog-task5-full-dialogs-tst-OOV.txt']
     for profile in profiles:
         print(profile)
-        with open(data_in_dir+trn_filename, 'r') as f_in:
-            with open(data_out_dir+profile+'/'+trn_filename, 'w') as f_out:
-                dialog_count = 0
-                in_lines = f_in.readlines()
-                for line in in_lines:
-                    # if line.strip():
-                    words = line.split(' ')
-                    if len(words) > 0:
-                        if words[0] == '1':
-                            if words[1] + '_' + words[2] == profile:
-                                write = True
-                                dialog_count +=1
-                            else:
-                                write = False
-                        if write:
-                            f_out.write(line)
-        print(dialog_count)
+        for filename in filenames:
+            print(filename)
+            with open(data_in_dir+filename, 'r') as f_in:
+                with open(data_out_dir+profile+'/'+filename, 'w') as f_out:
+                    dialog_count = 0
+                    in_lines = f_in.readlines()
+                    for line in in_lines:
+                        # if line.strip():
+                        words = line.split(' ')
+                        if len(words) > 0:
+                            if words[0] == '1':
+                                if words[1] + '_' + words[2] == profile:
+                                    write = True
+                                    dialog_count +=1
+                                else:
+                                    write = False
+                            if write:
+                                f_out.write(line)
+            print(dialog_count)
 
 def vary_data_ratio(in_data_dir, out_data_dir, file_name, train_data_percent, total_dialogs):
     for data_percent in train_data_percent:
@@ -91,7 +94,7 @@ def build_mp_sp_data(in_data_dir, out_data_dir, file_name, train_data_percent):
 
 
 def main(argv):
-    if FLAGS.function_name == 'split_by_profile_from_full':
+    if FLAGS.function_name == 'create_split_by_profile_from_full':
         ## for creating split-by-profile-from-full datasets
         data_in_dir = './../data/personalized-dialog-dataset/full/'
         data_out_dir = './../data/personalized-dialog-dataset/split-by-profile-from-full/'
