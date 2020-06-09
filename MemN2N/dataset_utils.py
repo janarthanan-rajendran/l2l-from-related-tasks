@@ -70,6 +70,8 @@ def main(argv):
         train_data_percent = [5, 10, 25]
         total_dialogs = 2000  # 1000 for split-by-profile and 2000 for split-by-profile-from-full
         vary_data_ratio(in_data_dir, out_data_dir, file_name, train_data_percent, total_dialogs)
+    else:
+        print('function not found!')
 
 if __name__ == '__main__':
     app.run(main)
