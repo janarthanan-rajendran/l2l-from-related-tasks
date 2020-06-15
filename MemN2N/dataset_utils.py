@@ -382,8 +382,8 @@ def main(argv):
         in_data_dir = './../data/personalized-dialog-dataset/full-mixed/'
         out_data_dir = './../data/personalized-dialog-dataset/split-by-profile-from-full-mixed'
         file_name = 'personalized-dialog-task5-full-dialogs-trn.txt'
-        # train_data_percent = [5, 10, 25, 100]
-        train_data_percent = [5]
+        train_data_percent = [5, 10, 25, 100]
+        # train_data_percent = [5]
         shift_nid = False
         build_mp_sp_data(in_data_dir, out_data_dir, file_name, train_data_percent, shift_nid)
     else:
