@@ -69,7 +69,10 @@ def build_mp_sp_data(in_data_dir, out_data_dir, file_name, train_data_percent, s
             with open(in_data_dir + file_name, 'r') as f_in:
                 with open(out_data_dir+'-'+str(data_percent)+ '-mp'+'/'+profile+'/'+file_name, 'a') as f_out:
                     in_lines = f_in.readlines()
-                    skip_line = True
+                    if shift_nid:
+                        skip_line = True
+                    else:
+                        skip_line = False
                     for line in in_lines:
                         if not skip_line:
                             if line.strip():
@@ -84,7 +87,10 @@ def build_mp_sp_data(in_data_dir, out_data_dir, file_name, train_data_percent, s
                         skip_line = False
                         line = line.strip()
                         if not line:
-                            skip_line = True
+                            if shift_nid:
+                                skip_line = True
+                            else:
+                                skip_line = False
 
             # checking
             dialog_count = 0
@@ -269,7 +275,7 @@ def build_mp_mixed_full_data(in_data_dir, out_data_dir, file_name, skip_dialog):
                     dialog = ''
 
             ## For each dialog in 'full' what are the equivalent dialogs (matching user and db) in 'full'
-            equi_dialog_counts = 0
+            equi_u_dialog_counts = 0
             u_dialog_equivalents = []
             u_dialog_equivalent = []
             for u_dialog in u_dialogs:
@@ -278,9 +284,23 @@ def build_mp_mixed_full_data(in_data_dir, out_data_dir, file_name, skip_dialog):
                         u_dialog_equivalent.append(num)
                 u_dialog_equivalents.append(u_dialog_equivalent)  # index of equivalent dialogs
                 if len(u_dialog_equivalent) > 1:
-                    equi_dialog_counts += 1
+                    equi_u_dialog_counts += 1
                 u_dialog_equivalent = []
-            print('Dialogs in full with multiple equi dialogs: ', equi_dialog_counts)
+            print('Dialogs in full with multiple user equi dialogs: ', equi_u_dialog_counts)
+
+            ## For each dialog in 'full' what are the equivalent dialogs (matching full dialogs) in 'full'
+            equi_dialog_counts = 0
+            dialog_equivalents = []
+            dialog_equivalent = []
+            for dialog in dialogs:
+                for num, dialog_temp in enumerate(dialogs):
+                    if dialog_temp == dialog:
+                        dialog_equivalent.append(num)
+                dialog_equivalents.append(dialog_equivalent)  # index of equivalent dialogs
+                if len(dialog_equivalent) > 1:
+                    equi_dialog_counts += 1
+                dialog_equivalent = []
+            print('Dialogs in full with multiple full equi dialogs: ', equi_dialog_counts)
 
 
             ## if skip-dialog=False, for all the dialogs in the 'full' mix when equivalent dialogs available and mix and write
@@ -343,6 +363,32 @@ def build_mp_mixed_full_data(in_data_dir, out_data_dir, file_name, skip_dialog):
     print('dialog count: ', dialog_count)
 
 
+def remove_profile_info(in_data_dir, out_data_dir, file_names, train_data_percent):
+    for data_percent in train_data_percent:
+        for profile in profiles:
+            for file_name in file_names:
+                with open(in_data_dir + '-' + str(data_percent) + '-mp' + '/' + profile + '/' + file_name, 'r') as f_in:
+                    with open(out_data_dir + '-' + str(data_percent) + '-mp-wop' + '/' + profile + '/' + file_name, 'w') as f_out:
+                        in_lines = f_in.readlines()
+                        profile_info = False
+                        for line in in_lines:
+                            if line.strip():
+                                nid, line = line.split(' ', 1)
+                                nid = int(nid)
+                                if nid == 1:
+                                    if '\t' not in line:
+                                        profile_info = True
+                                    else:
+                                        profile_info = False
+                                if not profile_info:
+                                    f_out.write(str(nid) + ' ' + line)
+                                else:
+                                    if nid != 1:
+                                        f_out.write(str(nid - 1) + ' ' + line)
+                            else:
+                                f_out.write(line)
+
+
 def main(argv):
     if FLAGS.function_name == 'create_split_by_profile_from_full':
         ## for creating split-by-profile-from-full datasets
@@ -386,6 +432,15 @@ def main(argv):
         # train_data_percent = [5]
         shift_nid = False
         build_mp_sp_data(in_data_dir, out_data_dir, file_name, train_data_percent, shift_nid)
+    elif FLAGS.function_name == 'remove_profile_info':
+        in_data_dir = './../data/personalized-dialog-dataset/split-by-profile-from-full-mixed'
+        out_data_dir = './../data/personalized-dialog-dataset/split-by-profile-from-full-mixed'
+        file_names = ['personalized-dialog-task5-full-dialogs-trn.txt',
+                      'personalized-dialog-task5-full-dialogs-dev.txt',
+                      'personalized-dialog-task5-full-dialogs-tst.txt']
+        train_data_percent = [5, 10, 25, 100]
+        # train_data_percent = [5]
+        remove_profile_info(in_data_dir, out_data_dir, file_names, train_data_percent)
     else:
         print('function not found!')
 
