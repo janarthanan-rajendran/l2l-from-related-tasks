@@ -245,7 +245,7 @@ def build_mp_mixed_sp_data(in_data_dir, in_data_dir_sp, out_data_dir, file_name,
         print(profile + ': ', dialog_count)
 
 
-def build_mp_mixed_full_data(in_data_dir, out_data_dir, file_name, skip_dialog):
+def build_mp_mixed_full_data(in_data_dir, out_data_dir, file_name, skip_dialog, mixed_count):
     np.random.seed(0)
     with open(in_data_dir + file_name, 'r') as f_in:
         with open(out_data_dir + file_name, 'w') as f_out:  # has the profile specific data
@@ -305,24 +305,25 @@ def build_mp_mixed_full_data(in_data_dir, out_data_dir, file_name, skip_dialog):
 
             ## if skip-dialog=False, for all the dialogs in the 'full' mix when equivalent dialogs available and mix and write
             ## to out file
-            num = 0
-            for u_dialog, dialog in zip(u_dialogs, dialogs):  # from 'full'
-                if not (skip_dialog and len(u_dialog_equivalents[num]) == 1):
-                    lines = dialog.split('\n')
-                    skip_line = True
-                    for line_num, line in enumerate(lines):
-                        rand_index = np.random.randint(len(u_dialog_equivalents[num]))
-                        selected_line = dialogs[u_dialog_equivalents[num][rand_index]].split('\n')[line_num]
-                        if not skip_line:
-                            if selected_line.strip():
-                                nid, selected_line = selected_line.split(' ', 1)
-                                nid = int(nid)
-                                f_out.write(str(nid - 1) + ' ' + selected_line)
-                            else:
-                                f_out.write(selected_line)
-                            f_out.write('\n')
-                        skip_line = False
-                num += 1
+            for i in range(mixed_count):
+                num = 0
+                for u_dialog, dialog in zip(u_dialogs, dialogs):  # from 'full'
+                    if not (skip_dialog and len(u_dialog_equivalents[num]) == 1):
+                        lines = dialog.split('\n')
+                        skip_line = True
+                        for line_num, line in enumerate(lines):
+                            rand_index = np.random.randint(len(u_dialog_equivalents[num]))
+                            selected_line = dialogs[u_dialog_equivalents[num][rand_index]].split('\n')[line_num]
+                            if not skip_line:
+                                if selected_line.strip():
+                                    nid, selected_line = selected_line.split(' ', 1)
+                                    nid = int(nid)
+                                    f_out.write(str(nid - 1) + ' ' + selected_line)
+                                else:
+                                    f_out.write(selected_line)
+                                f_out.write('\n')
+                            skip_line = False
+                    num += 1
             """
             ## for each dialog in sp, find equivalent dialogs in 'full', then mix and write 
             ## This will lead to more confusion, hence more harmful related tasks
@@ -423,7 +424,8 @@ def main(argv):
         out_data_dir = './../data/personalized-dialog-dataset/full-mixed/'
         file_name = 'personalized-dialog-task5-full-dialogs-trn.txt'
         skip_dialog = False
-        build_mp_mixed_full_data(in_data_dir, out_data_dir, file_name, skip_dialog)
+        mixed_count = 1
+        build_mp_mixed_full_data(in_data_dir, out_data_dir, file_name, skip_dialog, mixed_count)
         ## combining multi-profile and specific profile data
         in_data_dir = './../data/personalized-dialog-dataset/full-mixed/'
         out_data_dir = './../data/personalized-dialog-dataset/split-by-profile-from-full-mixed'
