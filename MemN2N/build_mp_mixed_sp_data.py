@@ -1,12 +1,13 @@
 import numpy as np
 
 in_data_dir = './../data/personalized-dialog-dataset/full/'
-out_data_dir = './../data/personalized-dialog-dataset/split-by-profile-25-mp-mixed-s/'
+out_data_dir = './../data/personalized-dialog-dataset/split-by-profile-10-mp-mixed-s/'
 file_name = 'personalized-dialog-task5-full-dialogs-trn.txt'
 skip_dialog = True
 profiles = ['female_elderly', 'female_middle-aged','female_young', 'male_elderly','male_middle-aged', 'male_young']
 
 for profile in profiles:
+    print(profile)
     with open(in_data_dir + file_name,'r') as f_in:
         with open(out_data_dir + profile + '/' + file_name,'a') as f_out:
             in_lines = f_in.readlines()

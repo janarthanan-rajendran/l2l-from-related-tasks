@@ -1,5 +1,5 @@
-in_data_dir = './../data/personalized-dialog-dataset/split-by-profile-25/'
-out_data_dir = './../data/personalized-dialog-dataset/split-by-profile-25-wop/'
+in_data_dir = './../data/personalized-dialog-dataset/split-by-profile-10-mp-mixed-s/'
+out_data_dir = './../data/personalized-dialog-dataset/split-by-profile-10-mp-mixed-s-wop/'
 
 profiles = ['female_elderly', 'female_middle-aged','female_young', 'male_elderly','male_middle-aged', 'male_young']
 file_names = ['personalized-dialog-task5-full-dialogs-trn.txt', 'personalized-dialog-task5-full-dialogs-dev.txt',

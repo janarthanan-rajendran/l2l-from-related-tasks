@@ -1,5 +1,5 @@
 in_data_dir = './../data/personalized-dialog-dataset/full/'
-out_data_dir = './../data/personalized-dialog-dataset/split-by-profile-25-mp/female_middle-aged/'
+out_data_dir = './../data/personalized-dialog-dataset/split-by-profile-10-mp/male_young/'
 file_name = 'personalized-dialog-task5-full-dialogs-trn.txt'
 
 with open(in_data_dir+file_name,'r') as f_in:

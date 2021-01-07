@@ -37,7 +37,7 @@ def vary_data_ratio(in_data_dir, out_data_dir, file_name, train_data_percent, to
     for data_percent in train_data_percent:
         dialog_max_count = data_percent/100 * total_dialogs
         for profile in profiles:
-            print(profile, data_percent)
+            print(profile, data_percent, dialog_max_count)
             dialog_count = 0
             with open(in_data_dir+profile+'/'+file_name,'r') as f_in:
                 with open(out_data_dir+'-'+str(data_percent)+'/'+profile+'/'+file_name,'w') as f_out:
@@ -398,11 +398,13 @@ def main(argv):
         create_split_by_profile_from_full(data_in_dir, data_out_dir)
     elif FLAGS.function_name == 'vary_data_ratio':
         ## for creating datasets with different proportion of training data
-        in_data_dir = './../data/personalized-dialog-dataset/split-by-profile-from-full/'
-        out_data_dir = './../data/personalized-dialog-dataset/split-by-profile-from-full'
+        #in_data_dir = './../data/personalized-dialog-dataset/split-by-profile-from-full/'
+        in_data_dir = './../data/personalized-dialog-dataset/split-by-profile/'
+        #out_data_dir = './../data/personalized-dialog-dataset/split-by-profile-from-full'
+        out_data_dir = './../data/personalized-dialog-dataset/split-by-profile'
         file_name = 'personalized-dialog-task5-full-dialogs-trn.txt'
-        train_data_percent = [5, 10, 25]
-        total_dialogs = 2000  # 1000 for split-by-profile and 2000 for split-by-profile-from-full
+        train_data_percent = [1, 5]
+        total_dialogs = 1000  # 1000 for split-by-profile and 2000 for split-by-profile-from-full
         vary_data_ratio(in_data_dir, out_data_dir, file_name, train_data_percent, total_dialogs)
     elif FLAGS.function_name == 'build_mp_sp_data':
         ## combining multi-profile and specific profile data
@@ -421,22 +423,22 @@ def main(argv):
     #     build_mp_mixed_sp_data(in_data_dir, in_data_dir_sp, out_data_dir, file_name, skip_dialog)
     elif FLAGS.function_name == 'build_mp_mixed_sp_data':
         in_data_dir = './../data/personalized-dialog-dataset/full/'
-        out_data_dir = './../data/personalized-dialog-dataset/full-mixed/'
+        out_data_dir = './../data/personalized-dialog-dataset/full-mixed-s2/'
         file_name = 'personalized-dialog-task5-full-dialogs-trn.txt'
-        skip_dialog = False
-        mixed_count = 1
+        skip_dialog = True
+        mixed_count = 2
         build_mp_mixed_full_data(in_data_dir, out_data_dir, file_name, skip_dialog, mixed_count)
         ## combining multi-profile and specific profile data
-        in_data_dir = './../data/personalized-dialog-dataset/full-mixed/'
-        out_data_dir = './../data/personalized-dialog-dataset/split-by-profile-from-full-mixed'
+        in_data_dir = './../data/personalized-dialog-dataset/full-mixed-s2/'
+        out_data_dir = './../data/personalized-dialog-dataset/split-by-profile-from-full-mixed-s2'
         file_name = 'personalized-dialog-task5-full-dialogs-trn.txt'
         train_data_percent = [5, 10, 25, 100]
         # train_data_percent = [5]
         shift_nid = False
         build_mp_sp_data(in_data_dir, out_data_dir, file_name, train_data_percent, shift_nid)
     elif FLAGS.function_name == 'remove_profile_info':
-        in_data_dir = './../data/personalized-dialog-dataset/split-by-profile-from-full-mixed'
-        out_data_dir = './../data/personalized-dialog-dataset/split-by-profile-from-full-mixed'
+        in_data_dir = './../data/personalized-dialog-dataset/split-by-profile-from-full-mixed-s2'
+        out_data_dir = './../data/personalized-dialog-dataset/split-by-profile-from-full-mixed-s2'
         file_names = ['personalized-dialog-task5-full-dialogs-trn.txt',
                       'personalized-dialog-task5-full-dialogs-dev.txt',
                       'personalized-dialog-task5-full-dialogs-tst.txt']
