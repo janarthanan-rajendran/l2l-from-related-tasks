@@ -1,7 +1,7 @@
 from __future__ import absolute_import
 from __future__ import print_function
 
-from data_utils import load_dialog_task, vectorize_data, load_candidates, vectorize_candidates, vectorize_candidates_sparse, tokenize
+from data_utils import load_dialog_task, vectorize_data, load_candidates, vectorize_candidates, vectorize_candidates_sparse, tokenize, r_load_dialog_task
 from sklearn import metrics
 from memn2n import MemN2NDialog
 from itertools import chain
@@ -11,20 +11,23 @@ import tensorflow as tf
 import numpy as np
 import os
 import pickle
+import random
 
 tf.flags.DEFINE_float("learning_rate", 0.001, "Learning rate for Adam Optimizer.")
 tf.flags.DEFINE_float("epsilon", 1e-8, "Epsilon value for Adam Optimizer.")
 tf.flags.DEFINE_float("max_grad_norm", 40.0, "Clip gradients to this norm.")
-tf.flags.DEFINE_integer("evaluation_interval", 2, "Evaluate and print results every x epochs")
+tf.flags.DEFINE_integer("evaluation_interval", 10, "Evaluate and print results every x epochs")
 tf.flags.DEFINE_integer("batch_size", 32, "Batch size for training.")
 tf.flags.DEFINE_integer("hops", 3, "Number of hops in the Memory Network.")
 tf.flags.DEFINE_integer("epochs", 200, "Number of epochs to train for.")
 tf.flags.DEFINE_integer("embedding_size", 20, "Embedding size for embedding matrices.")
 tf.flags.DEFINE_integer("memory_size", 250, "Maximum size of memory.")
 tf.flags.DEFINE_integer("task_id", 1, "task id, 1 <= id <= 5")
+tf.flags.DEFINE_integer("r_task_id", 5, "task id of the related task, 1 <= id <= 5")
 tf.flags.DEFINE_integer("random_state", None, "Random state.")
 tf.flags.DEFINE_string("data_dir", "../data/personalized-dialog-dataset/full", "Directory containing bAbI tasks")
 tf.flags.DEFINE_string("test_data_dir", "../data/personalized-dialog-dataset/full", "Directory testing tasks")
+tf.flags.DEFINE_string("r_data_dir", "../data/dialog-bAbI-tasks", "Directory containing original bAbI tasks")
 tf.flags.DEFINE_string("model_dir", "gen/", "Directory containing memn2n model checkpoints")
 tf.flags.DEFINE_boolean('has_qnet', False, 'if True, add question network')
 tf.flags.DEFINE_boolean('train', True, 'if True, begin to train')
@@ -37,7 +40,7 @@ print("Started Task:", FLAGS.task_id)
 
 
 class chatBot(object):
-    def __init__(self, data_dir, model_dir, result_dir, task_id,
+    def __init__(self, data_dir, r_data_dir, model_dir, result_dir, task_id, r_task_id,
                  OOV=False,
                  has_qnet =False,
                  memory_size=250,
@@ -56,10 +59,14 @@ class chatBot(object):
 
         Args:
             data_dir: Directory containing personalized dialog tasks.
+
+            r_data_dir: Directory containing related task's data
             
             model_dir: Directory containing memn2n model checkpoints.
 
             task_id: Personalized dialog task id, 1 <= id <= 5. Defaults to `1`.
+
+            r_task_id: Related tasks task id.
 
             OOV: If `True`, use OOV test set. Defaults to `False`
 
@@ -93,7 +100,9 @@ class chatBot(object):
         """
 
         self.data_dir = data_dir
+        self.r_data_dir = r_data_dir
         self.task_id = task_id
+        self.r_task_id = r_task_id
         self.model_dir = model_dir
         self.result_dir = result_dir
         self.OOV = OOV
@@ -111,16 +120,28 @@ class chatBot(object):
         self.save_vocab = save_vocab
         self.load_vocab = load_vocab
 
-        candidates,self.candid2indx = load_candidates(self.data_dir, self.task_id)
+        candidates,self.candid2indx = load_candidates(self.data_dir, self.task_id, True)
         self.n_cand = len(candidates)
         print("Candidate Size", self.n_cand)
         self.indx2candid = dict((self.candid2indx[key],key) 
                                 for key in self.candid2indx)
+
+        if self.has_qnet:
+            r_candidates, self.r_candid2indx = load_candidates(self.r_data_dir, self.r_task_id, False)
+            self.r_n_cand = len(r_candidates)
+            print("R Candidate Size", self.r_n_cand)
+            self.r_indx2candid = dict((self.r_candid2indx[key], key)
+                                    for key in self.r_candid2indx)
         
         # Task data
         self.trainData, self.testData, self.valData = load_dialog_task(
             self.data_dir, self.task_id, self.candid2indx, self.OOV)
         data = self.trainData + self.testData + self.valData
+
+        if self.has_qnet:
+            self.r_trainData, _, _ = r_load_dialog_task(
+                self.r_data_dir, self.r_task_id, self.r_candid2indx, self.OOV)
+            data = data + self.r_trainData
         
         self.build_vocab(data,candidates,self.save_vocab,self.load_vocab)
         
@@ -154,9 +175,15 @@ class chatBot(object):
             vocab_file = open('vocab.obj', 'rb')
             vocab = pickle.load(vocab_file)
         else:
-            vocab = reduce(lambda x, y: x | y, 
-                           (set(list(chain.from_iterable(s)) + q) 
-                             for s, q, a, q_a in data))
+            if self.has_qnet:
+                vocab = reduce(lambda x, y: x | y,
+                               (set(list(chain.from_iterable(s)) + q + q_a)
+                                 for s, q, a, q_a in data))
+            else:
+                vocab = reduce(lambda x, y: x | y,
+                               (set(list(chain.from_iterable(s)) + q)
+                                for s, q, a, q_a in data))
+
             vocab |= reduce(lambda x,y: x|y, 
                             (set(candidate) for candidate in candidates) )
             vocab = sorted(vocab)
@@ -167,10 +194,14 @@ class chatBot(object):
         self.sentence_size = max(map(len, chain.from_iterable(s for s, _, _, _ in data)))
         self.candidate_sentence_size=max(map(len,candidates))
         query_size = max(map(len, (q for _, q, _, _ in data)))
+        q_answer_size = max(map(len, (q_a for _, _, _, q_a in data)))
         self.memory_size = min(self.memory_size, max_story_size)
         self.vocab_size = len(self.word_idx) + 1  # +1 for nil word
-        self.sentence_size = max(query_size, self.sentence_size)  # for the position
-        
+        if self.has_qnet:
+            self.sentence_size = max(query_size, self.sentence_size, q_answer_size)  # for the position
+        else:
+            self.sentence_size = max(query_size, self.sentence_size)  # for the position
+
         # Print parameters
         print("vocab size:", self.vocab_size)
         print("Longest sentence length", self.sentence_size)
@@ -191,6 +222,12 @@ class chatBot(object):
         trainS, trainQ, trainA, trainqA = vectorize_data(
             self.trainData, self.word_idx, self.sentence_size, self.candidate_sentence_size,
             self.batch_size, self.n_cand, self.memory_size)
+        if self.has_qnet:
+            r_trainS, r_trainQ, r_trainA, r_trainqA = vectorize_data(
+                self.r_trainData, self.word_idx, self.sentence_size, self.candidate_sentence_size,
+                self.batch_size, self.r_n_cand, self.memory_size)
+            n_r_train = len(r_trainS)
+
         valS, valQ, valA, _ = vectorize_data(
             self.valData, self.word_idx, self.sentence_size, self.candidate_sentence_size,
             self.batch_size, self.n_cand, self.memory_size)
@@ -203,33 +240,74 @@ class chatBot(object):
                       range(self.batch_size, n_train, self.batch_size))
         batches = [(start, end) for start, end in batches]
         best_validation_accuracy=0
-        
+
+        if self.has_qnet:
+            np.random.shuffle(batches)
+            p_batches = batches[:int(len(batches)/2)]
+            r_batches_p = batches[int(len(batches)/2):]
+            # p_batches = zip(range(0, int(n_train/2) - self.batch_size, self.batch_size),
+            #               range(self.batch_size, int(n_train/2), self.batch_size))
+            # p_batches = [(start, end) for start, end in p_batches]
+            # # primary data for the related tasks training (qnet training)
+            # r_batches_p = zip(range(int(n_train/2), n_train - self.batch_size, self.batch_size),
+            #               range(int(n_train/2) + self.batch_size, n_train, self.batch_size))
+            # r_batches_p = [(start, end) for start, end in r_batches_p]
+            r_batches_r = zip(range(0, n_r_train-self.batch_size, self.batch_size),
+                          range(self.batch_size, n_r_train, self.batch_size))
+            r_batches_r = [(start, end) for start, end in r_batches_r]
+
         # Training loop
         for t in range(1, self.epochs+1):
             print('Epoch', t)
             np.random.shuffle(batches)
             total_cost = 0.0
-            for start, end in batches:
-                s = trainS[start:end]
-                q = trainQ[start:end]
-                a = trainA[start:end]
-                q_a = trainqA[start:end]
-                if self.has_qnet:
-                    if t%2 == 0:
-                        cost_t = self.model.q_batch_fit(s, q, a, q_a, s, q, a, True) #primary
+            if self.has_qnet:
+                np.random.shuffle(p_batches)
+                np.random.shuffle(r_batches_p)
+                np.random.shuffle(r_batches_r)
+                if t % 2 == 0:
+                    for start, end in p_batches:
+                        s = trainS[start:end]
+                        q = trainQ[start:end]
+                        a = trainA[start:end]
+                        q_a = trainqA[start:end]
+                        cost_t = self.model.q_batch_fit(s, q, a, q_a, None, None, None, True)  # primary
                         # print('primary cost', cost_t)
-                    else:
-                        outer_cost_t, aux_cost_t = self.model.q_batch_fit(s, q, a, q_a, s, q, a, False) #primary
+                        total_cost += cost_t
+                else:
+                    for r_start,r_end in r_batches_r:
+                        start, end = random.sample(r_batches_p,1)[0]
+                        s = trainS[start:end]
+                        q = trainQ[start:end]
+                        a = trainA[start:end]
+                        q_a = trainqA[start:end]
+                        r_s = r_trainS[r_start:r_end]
+                        r_q = r_trainQ[r_start:r_end]
+                        r_a = r_trainA[r_start:r_end]
+                        r_q_a = r_trainqA[r_start:r_end]
+                        # print('s', np.shape(s), 'q', np.shape(q), 'a', np.shape(a), 'q_a', np.shape(q_a))
+                        outer_cost_t, aux_cost_t = self.model.q_batch_fit(r_s, r_q, r_a, r_q_a, s, q, a, False)  # related
+                        # outer_cost_t, aux_cost_t = self.model.q_batch_fit(s, q, a, q_a, s, q, a, False)  # related
                         cost_t = outer_cost_t
                         # print('outer_cost', outer_cost_t, 'aux_cost', aux_cost_t)
-                else:
+                        total_cost += cost_t
+            else:
+                for start, end in batches:
+                    s = trainS[start:end]
+                    q = trainQ[start:end]
+                    a = trainA[start:end]
+                    # q_a = trainqA[start:end]
                     cost_t = self.model.batch_fit(s, q, a)
-                total_cost += cost_t
+                    total_cost += cost_t
             if t % self.evaluation_interval == 0:
                 # Perform validation
-                train_preds = self.batch_predict(trainS,trainQ,n_train)
+                if self.has_qnet:
+                    train_preds = self.batch_predict(trainS[:int(n_train/2)],trainQ[:int(n_train/2)],int(n_train/2))
+                    train_acc = metrics.accuracy_score(np.array(train_preds), trainA[:int(n_train/2)])
+                else:
+                    train_preds = self.batch_predict(trainS,trainQ,n_train)
+                    train_acc = metrics.accuracy_score(np.array(train_preds), trainA)
                 val_preds = self.batch_predict(valS,valQ,n_val)
-                train_acc = metrics.accuracy_score(np.array(train_preds), trainA)
                 val_acc = metrics.accuracy_score(val_preds, valA)
                 print('-----------------------')
                 print('Epoch', t)
@@ -332,7 +410,7 @@ if __name__ == '__main__':
         os.makedirs(model_dir)
     if not os.path.exists(result_dir):
         os.makedirs(result_dir)
-    chatbot = chatBot(FLAGS.data_dir, model_dir, result_dir, FLAGS.task_id, OOV=FLAGS.OOV,
+    chatbot = chatBot(FLAGS.data_dir, FLAGS.r_data_dir, model_dir, result_dir, FLAGS.task_id, FLAGS.r_task_id, OOV=FLAGS.OOV,
                       has_qnet=FLAGS.has_qnet, batch_size=FLAGS.batch_size, memory_size=FLAGS.memory_size,
                       epochs=FLAGS.epochs, hops=FLAGS.hops, save_vocab=FLAGS.save_vocab,
                       load_vocab=FLAGS.load_vocab, learning_rate=FLAGS.learning_rate,

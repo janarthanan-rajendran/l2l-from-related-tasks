@@ -8,14 +8,17 @@ import tensorflow as tf
 stop_words = set(["a","an","the"])
 
 
-def load_candidates(data_dir, task_id):
+def load_candidates(data_dir, task_id, primary):
     """Load bot response candidates."""
     assert task_id > 0 and task_id < 6
 
     candidates=[]
     candidates_f=None
     candid_dic={}
-    candidates_f='./personalized-dialog-candidates.txt'
+    if not primary:
+        candidates_f = './dialog-babi-candidates.txt'
+    else:
+        candidates_f='./personalized-dialog-candidates.txt'
     with open(os.path.join(data_dir,candidates_f)) as f:
         for i,line in enumerate(f):
             candid_dic[line.strip().split(' ',1)[1]] = i
@@ -38,6 +41,27 @@ def load_dialog_task(data_dir, task_id, candid_dic, isOOV):
     if isOOV:
         test_file = [f for f in files if s in f and 'tst-OOV' in f][0]
     else: 
+        test_file = [f for f in files if s in f and 'tst.' in f][0]
+    val_file = [f for f in files if s in f and 'dev' in f][0]
+    train_data = get_dialogs(train_file,candid_dic)
+    test_data = get_dialogs(test_file,candid_dic)
+    val_data = get_dialogs(val_file,candid_dic)
+    return train_data, test_data, val_data
+
+def r_load_dialog_task(data_dir, task_id, candid_dic, isOOV):
+    '''Load the nth task. There are 5 tasks in total.
+
+    Returns a tuple containing the training and testing data for the task.
+    '''
+    assert task_id > 0 and task_id < 6
+
+    files = os.listdir(data_dir)
+    files = [os.path.join(data_dir, f) for f in files]
+    s = 'dialog-babi-task{}-'.format(task_id)
+    train_file = [f for f in files if s in f and 'trn' in f][0]
+    if isOOV:
+        test_file = [f for f in files if s in f and 'tst-OOV' in f][0]
+    else:
         test_file = [f for f in files if s in f and 'tst.' in f][0]
     val_file = [f for f in files if s in f and 'dev' in f][0]
     train_data = get_dialogs(train_file,candid_dic)
@@ -167,7 +191,7 @@ def vectorize_data(data, word_idx, sentence_size, candidate_sentence_size,
         lq = max(0, sentence_size - len(query))
         q = [word_idx[w] if w in word_idx else 0 for w in query] + [0] * lq
 
-        q_la = max(0, candidate_sentence_size - len(q_answer))
+        q_la = max(0, sentence_size - len(q_answer))
         q_a = [word_idx[w] if w in word_idx else 0 for w in q_answer] + [0] * q_la
 
         S.append(np.array(ss))

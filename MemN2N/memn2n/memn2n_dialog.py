@@ -10,7 +10,7 @@ from datetime import datetime
 class MemN2NDialog(object):
     """End-To-End Memory Network."""
     def __init__(self, has_qnet, batch_size, vocab_size, candidates_size,
-                 sentence_size, embedding_size, candidates_vec, candidates_sentence_size,
+                 sentence_size, embedding_size, candidates_vec, candidate_sentence_size,
                  hops=3,
                  max_grad_norm=40.0,
                  nonlin=None,
@@ -47,7 +47,7 @@ class MemN2NDialog(object):
 
             candidates_vec: The numpy array of candidates encoding.
 
-            candidates_sentence_size: candidates_sentence_size.
+            candidate_sentence_size: candidate_sentence_size.
 
             hops: The number of hops. A hop consists of reading and addressing 
             a memory slot. Defaults to `3`.
@@ -72,7 +72,7 @@ class MemN2NDialog(object):
         self._batch_size = batch_size
         self._vocab_size = vocab_size
         self._candidates_size = candidates_size
-        self._candidates_sentence_size = candidates_sentence_size
+        self._candidate_sentence_size = candidate_sentence_size
         self._sentence_size = sentence_size
         self._embedding_size = embedding_size
         self._hops = hops
@@ -230,7 +230,7 @@ class MemN2NDialog(object):
         self._answers = tf.placeholder(tf.int32, [None], name="answers")
         if self._has_qnet:
             self._q_answers = tf.placeholder(
-                tf.int32, [None, self._candidates_sentence_size], name="q_answers")
+                tf.int32, [None, self._sentence_size], name="q_answers")
             self._p_stories = tf.placeholder(
                 tf.int32, [None, None, self._sentence_size], name="p_stories")
             self._p_queries = tf.placeholder(
