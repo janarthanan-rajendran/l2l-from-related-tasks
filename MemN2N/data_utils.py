@@ -80,7 +80,7 @@ def parse_dialogs_per_response(lines,candid_dic):
                 u = tokenize(u)
                 r = tokenize(r)
                 # Add temporal encoding, and utterance/response encoding
-                data.append((context[:],u[:],a))
+                data.append((context[:],u[:],a,r[:]))
                 u.append('$u')
                 u.append('#'+str(nid))
                 r.append('$r')
@@ -131,7 +131,7 @@ def vectorize_candidates(candidates,word_idx,sentence_size):
     return tf.constant(C,shape=shape)
 
 
-def vectorize_data(data, word_idx, sentence_size, 
+def vectorize_data(data, word_idx, sentence_size, candidate_sentence_size,
                    batch_size, candidates_size, max_memory_size):
     """
     Vectorize stories and queries.
@@ -146,8 +146,9 @@ def vectorize_data(data, word_idx, sentence_size,
     S = []
     Q = []
     A = []
+    q_A = []
     data.sort(key=lambda x:len(x[0]),reverse=True)
-    for i, (story, query, answer) in enumerate(data):
+    for i, (story, query, answer, q_answer) in enumerate(data):
         if i%batch_size==0:
             memory_size=max(1,min(max_memory_size,len(story)))
         ss = []
@@ -166,7 +167,11 @@ def vectorize_data(data, word_idx, sentence_size,
         lq = max(0, sentence_size - len(query))
         q = [word_idx[w] if w in word_idx else 0 for w in query] + [0] * lq
 
+        q_la = max(0, candidate_sentence_size - len(q_answer))
+        q_a = [word_idx[w] if w in word_idx else 0 for w in q_answer] + [0] * q_la
+
         S.append(np.array(ss))
         Q.append(np.array(q))
         A.append(np.array(answer))
-    return S, Q, A
+        q_A.append(np.array(q_a))
+    return S, Q, A, q_A

@@ -15,7 +15,7 @@ import pickle
 tf.flags.DEFINE_float("learning_rate", 0.001, "Learning rate for Adam Optimizer.")
 tf.flags.DEFINE_float("epsilon", 1e-8, "Epsilon value for Adam Optimizer.")
 tf.flags.DEFINE_float("max_grad_norm", 40.0, "Clip gradients to this norm.")
-tf.flags.DEFINE_integer("evaluation_interval", 10, "Evaluate and print results every x epochs")
+tf.flags.DEFINE_integer("evaluation_interval", 2, "Evaluate and print results every x epochs")
 tf.flags.DEFINE_integer("batch_size", 32, "Batch size for training.")
 tf.flags.DEFINE_integer("hops", 3, "Number of hops in the Memory Network.")
 tf.flags.DEFINE_integer("epochs", 200, "Number of epochs to train for.")
@@ -26,6 +26,7 @@ tf.flags.DEFINE_integer("random_state", None, "Random state.")
 tf.flags.DEFINE_string("data_dir", "../data/personalized-dialog-dataset/full", "Directory containing bAbI tasks")
 tf.flags.DEFINE_string("test_data_dir", "../data/personalized-dialog-dataset/full", "Directory testing tasks")
 tf.flags.DEFINE_string("model_dir", "gen/", "Directory containing memn2n model checkpoints")
+tf.flags.DEFINE_boolean('has_qnet', False, 'if True, add question network')
 tf.flags.DEFINE_boolean('train', True, 'if True, begin to train')
 tf.flags.DEFINE_boolean('sep_test', False, 'if True, load test data from a test data dir')
 tf.flags.DEFINE_boolean('OOV', False, 'if True, use OOV test set')
@@ -38,6 +39,7 @@ print("Started Task:", FLAGS.task_id)
 class chatBot(object):
     def __init__(self, data_dir, model_dir, result_dir, task_id,
                  OOV=False,
+                 has_qnet =False,
                  memory_size=250,
                  random_state=None,
                  batch_size=32,
@@ -60,6 +62,8 @@ class chatBot(object):
             task_id: Personalized dialog task id, 1 <= id <= 5. Defaults to `1`.
 
             OOV: If `True`, use OOV test set. Defaults to `False`
+
+            has_qnet: If True, add question network
 
             memory_size: The max size of the memory. Defaults to `250`.
 
@@ -93,6 +97,7 @@ class chatBot(object):
         self.model_dir = model_dir
         self.result_dir = result_dir
         self.OOV = OOV
+        self.has_qnet = has_qnet
         self.memory_size = memory_size
         self.random_state = random_state
         self.batch_size = batch_size
@@ -130,13 +135,13 @@ class chatBot(object):
             learning_rate=self.learning_rate, epsilon=self.epsilon)
         
         self.sess = tf.Session()
-        
-        self.model = MemN2NDialog(self.batch_size, self.vocab_size, self.n_cand, 
-                                  self.sentence_size, self.embedding_size, 
-                                  self.candidates_vec, session=self.sess,
-                                  hops=self.hops, max_grad_norm=self.max_grad_norm, 
+
+        self.model = MemN2NDialog(self.has_qnet, self.batch_size, self.vocab_size, self.n_cand,
+                                  self.sentence_size, self.embedding_size,
+                                  self.candidates_vec, self.candidate_sentence_size, session=self.sess,
+                                  hops=self.hops, max_grad_norm=self.max_grad_norm,
                                   optimizer=optimizer, task_id=task_id)
-        
+
         self.saver = tf.train.Saver(max_to_keep=50)
         
         self.summary_writer = tf.summary.FileWriter(
@@ -151,17 +156,17 @@ class chatBot(object):
         else:
             vocab = reduce(lambda x, y: x | y, 
                            (set(list(chain.from_iterable(s)) + q) 
-                             for s, q, a in data))
+                             for s, q, a, q_a in data))
             vocab |= reduce(lambda x,y: x|y, 
                             (set(candidate) for candidate in candidates) )
             vocab = sorted(vocab)
         
         self.word_idx = dict((c, i + 1) for i, c in enumerate(vocab))
-        max_story_size = max(map(len, (s for s, _, _ in data)))
-        mean_story_size = int(np.mean([ len(s) for s, _, _ in data ]))
-        self.sentence_size = max(map(len, chain.from_iterable(s for s, _, _ in data)))
+        max_story_size = max(map(len, (s for s, _, _, _ in data)))
+        mean_story_size = int(np.mean([ len(s) for s, _, _, _ in data ]))
+        self.sentence_size = max(map(len, chain.from_iterable(s for s, _, _, _ in data)))
         self.candidate_sentence_size=max(map(len,candidates))
-        query_size = max(map(len, (q for _, q, _ in data)))
+        query_size = max(map(len, (q for _, q, _, _ in data)))
         self.memory_size = min(self.memory_size, max_story_size)
         self.vocab_size = len(self.word_idx) + 1  # +1 for nil word
         self.sentence_size = max(query_size, self.sentence_size)  # for the position
@@ -183,11 +188,11 @@ class chatBot(object):
 
         Performs validation at given evaluation intervals.
         """
-        trainS, trainQ, trainA = vectorize_data(
-            self.trainData, self.word_idx, self.sentence_size, 
+        trainS, trainQ, trainA, trainqA = vectorize_data(
+            self.trainData, self.word_idx, self.sentence_size, self.candidate_sentence_size,
             self.batch_size, self.n_cand, self.memory_size)
-        valS, valQ, valA = vectorize_data(
-            self.valData, self.word_idx, self.sentence_size, 
+        valS, valQ, valA, _ = vectorize_data(
+            self.valData, self.word_idx, self.sentence_size, self.candidate_sentence_size,
             self.batch_size, self.n_cand, self.memory_size)
         n_train = len(trainS)
         n_val = len(valS)
@@ -208,7 +213,17 @@ class chatBot(object):
                 s = trainS[start:end]
                 q = trainQ[start:end]
                 a = trainA[start:end]
-                cost_t = self.model.batch_fit(s, q, a)
+                q_a = trainqA[start:end]
+                if self.has_qnet:
+                    if t%2 == 0:
+                        cost_t = self.model.q_batch_fit(s, q, a, q_a, s, q, a, True) #primary
+                        # print('primary cost', cost_t)
+                    else:
+                        outer_cost_t, aux_cost_t = self.model.q_batch_fit(s, q, a, q_a, s, q, a, False) #primary
+                        cost_t = outer_cost_t
+                        # print('outer_cost', outer_cost_t, 'aux_cost', aux_cost_t)
+                else:
+                    cost_t = self.model.batch_fit(s, q, a)
                 total_cost += cost_t
             if t % self.evaluation_interval == 0:
                 # Perform validation
@@ -253,12 +268,12 @@ class chatBot(object):
             print("...no checkpoint found...")
 
         if FLAGS.sep_test:
-            testS, testQ, testA = vectorize_data(
-                self.sep_testData, self.word_idx, self.sentence_size,
+            testS, testQ, testA, _ = vectorize_data(
+                self.sep_testData, self.word_idx, self.sentence_size, self.candidate_sentence_size,
                 self.batch_size, self.n_cand, self.memory_size)
         else:
-            testS, testQ, testA = vectorize_data(
-                self.testData, self.word_idx, self.sentence_size,
+            testS, testQ, testA, _ = vectorize_data(
+                self.testData, self.word_idx, self.sentence_size, self.candidate_sentence_size,
                 self.batch_size, self.n_cand, self.memory_size)
         n_test = len(testS)
         print("Testing Size", n_test)
@@ -318,7 +333,7 @@ if __name__ == '__main__':
     if not os.path.exists(result_dir):
         os.makedirs(result_dir)
     chatbot = chatBot(FLAGS.data_dir, model_dir, result_dir, FLAGS.task_id, OOV=FLAGS.OOV,
-                      batch_size=FLAGS.batch_size, memory_size=FLAGS.memory_size,
+                      has_qnet=FLAGS.has_qnet, batch_size=FLAGS.batch_size, memory_size=FLAGS.memory_size,
                       epochs=FLAGS.epochs, hops=FLAGS.hops, save_vocab=FLAGS.save_vocab,
                       load_vocab=FLAGS.load_vocab, learning_rate=FLAGS.learning_rate,
                       embedding_size=FLAGS.embedding_size, evaluation_interval=FLAGS.evaluation_interval)
