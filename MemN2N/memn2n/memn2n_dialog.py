@@ -100,7 +100,8 @@ class MemN2NDialog(object):
         if self._has_qnet:
             logits, u_k = self._inference(weights, self._stories, self._queries)
             ques_targ, ans_targ = self._q_inference(weights, self._stories, self._queries, self._q_answers)
-            aux_mse = tf.losses.mean_squared_error(labels=ans_targ, predictions=u_k)
+            # aux_mse = tf.losses.mean_squared_error(labels=ans_targ, predictions=u_k)
+            aux_mse = tf.reduce_mean(tf.reduce_sum(tf.square(ans_targ - u_k),1))
             cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
                 logits=logits, labels=self._answers, name="cross_entropy")
             cross_entropy_sum = tf.reduce_sum(cross_entropy, name="cross_entropy_sum")

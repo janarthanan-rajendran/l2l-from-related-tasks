@@ -12,6 +12,7 @@ import numpy as np
 import os
 import pickle
 import random
+import time
 
 tf.flags.DEFINE_float("learning_rate", 0.001, "Learning rate for Adam Optimizer.")
 tf.flags.DEFINE_float("epsilon", 1e-8, "Epsilon value for Adam Optimizer.")
@@ -35,6 +36,8 @@ tf.flags.DEFINE_boolean('sep_test', False, 'if True, load test data from a test 
 tf.flags.DEFINE_boolean('OOV', False, 'if True, use OOV test set')
 tf.flags.DEFINE_boolean('save_vocab', False, 'if True, saves vocabulary')
 tf.flags.DEFINE_boolean('load_vocab', False, 'if True, loads vocabulary instead of building it')
+tf.flags.DEFINE_boolean('alternate', True, 'if True, alternate training between primary and related every epoch, else do it every batch')
+
 FLAGS = tf.flags.FLAGS
 print("Started Task:", FLAGS.task_id)
 
@@ -54,7 +57,8 @@ class chatBot(object):
                  epochs=200,
                  embedding_size=20,
                  save_vocab=False,
-                 load_vocab=False):
+                 load_vocab=False,
+                 alternate=True):
         """Creates wrapper for training and testing a chatbot model.
 
         Args:
@@ -97,6 +101,8 @@ class chatBot(object):
             save_vocab: If `True`, save vocabulary file. Defaults to `False`.
 
             load_vocab: If `True`, load vocabulary from file. Defaults to `False`.
+
+            alternate: If True alternate between primary and related every epoch
         """
 
         self.data_dir = data_dir
@@ -119,6 +125,7 @@ class chatBot(object):
         self.embedding_size = embedding_size
         self.save_vocab = save_vocab
         self.load_vocab = load_vocab
+        self.alternate = alternate
 
         candidates,self.candid2indx = load_candidates(self.data_dir, self.task_id, True)
         self.n_cand = len(candidates)
@@ -257,6 +264,7 @@ class chatBot(object):
             r_batches_r = [(start, end) for start, end in r_batches_r]
 
         # Training loop
+        start_time = time.process_time()
         for t in range(1, self.epochs+1):
             print('Epoch', t)
             np.random.shuffle(batches)
@@ -265,7 +273,35 @@ class chatBot(object):
                 np.random.shuffle(p_batches)
                 np.random.shuffle(r_batches_p)
                 np.random.shuffle(r_batches_r)
-                if t % 2 == 0:
+
+                if self.alternate:
+                    if t % 2 == 0:
+                        for start, end in p_batches:
+                            s = trainS[start:end]
+                            q = trainQ[start:end]
+                            a = trainA[start:end]
+                            q_a = trainqA[start:end]
+                            cost_t = self.model.q_batch_fit(s, q, a, q_a, None, None, None, True)  # primary
+                            # print('primary cost', cost_t)
+                            total_cost += cost_t
+                    else:
+                        for r_start,r_end in r_batches_r:
+                            start, end = random.sample(r_batches_p,1)[0]
+                            r_s_p = trainS[start:end]
+                            r_q_p = trainQ[start:end]
+                            r_a_p = trainA[start:end]
+                            r_q_a_p = trainqA[start:end]
+                            r_s = r_trainS[r_start:r_end]
+                            r_q = r_trainQ[r_start:r_end]
+                            r_a = r_trainA[r_start:r_end]
+                            r_q_a = r_trainqA[r_start:r_end]
+                            # print('s', np.shape(s), 'q', np.shape(q), 'a', np.shape(a), 'q_a', np.shape(q_a))
+                            outer_cost_t, aux_cost_t = self.model.q_batch_fit(r_s, r_q, r_a, r_q_a, r_s_p, r_q_p, r_a_p, False)  # related
+                            # outer_cost_t, aux_cost_t = self.model.q_batch_fit(s, q, a, q_a, s, q, a, False)  # related
+                            cost_t = outer_cost_t
+                            # print('outer_cost', outer_cost_t, 'aux_cost', aux_cost_t)
+                            total_cost += cost_t
+                else:
                     for start, end in p_batches:
                         s = trainS[start:end]
                         q = trainQ[start:end]
@@ -274,19 +310,20 @@ class chatBot(object):
                         cost_t = self.model.q_batch_fit(s, q, a, q_a, None, None, None, True)  # primary
                         # print('primary cost', cost_t)
                         total_cost += cost_t
-                else:
-                    for r_start,r_end in r_batches_r:
-                        start, end = random.sample(r_batches_p,1)[0]
-                        s = trainS[start:end]
-                        q = trainQ[start:end]
-                        a = trainA[start:end]
-                        q_a = trainqA[start:end]
+
+                        r_start, r_end = random.sample(r_batches_r)
+                        r_start_p, r_end_p = random.sample(r_batches_p, 1)[0]
+                        r_s_p = trainS[r_start_p:r_end_p]
+                        r_q_p = trainQ[r_start_p:r_end_p]
+                        r_a_p = trainA[r_start_p:r_end_p]
+                        r_q_a_p = trainqA[r_start_p:r_end_p]
                         r_s = r_trainS[r_start:r_end]
                         r_q = r_trainQ[r_start:r_end]
                         r_a = r_trainA[r_start:r_end]
                         r_q_a = r_trainqA[r_start:r_end]
                         # print('s', np.shape(s), 'q', np.shape(q), 'a', np.shape(a), 'q_a', np.shape(q_a))
-                        outer_cost_t, aux_cost_t = self.model.q_batch_fit(r_s, r_q, r_a, r_q_a, s, q, a, False)  # related
+                        outer_cost_t, aux_cost_t = self.model.q_batch_fit(r_s, r_q, r_a, r_q_a, r_s_p, r_q_p, r_a_p,
+                                                                          False)  # related
                         # outer_cost_t, aux_cost_t = self.model.q_batch_fit(s, q, a, q_a, s, q, a, False)  # related
                         cost_t = outer_cost_t
                         # print('outer_cost', outer_cost_t, 'aux_cost', aux_cost_t)
@@ -332,7 +369,10 @@ class chatBot(object):
                     best_validation_accuracy=val_acc
                     self.saver.save(self.sess,self.model_dir+'model.ckpt',
                                     global_step=t)
-                    
+        time_taken = time.process_time() - start_time
+        print("Time taken", time_taken)
+
+    
     def test(self):
         """Runs testing on testing set data.
 
@@ -414,7 +454,7 @@ if __name__ == '__main__':
                       has_qnet=FLAGS.has_qnet, batch_size=FLAGS.batch_size, memory_size=FLAGS.memory_size,
                       epochs=FLAGS.epochs, hops=FLAGS.hops, save_vocab=FLAGS.save_vocab,
                       load_vocab=FLAGS.load_vocab, learning_rate=FLAGS.learning_rate,
-                      embedding_size=FLAGS.embedding_size, evaluation_interval=FLAGS.evaluation_interval)
+                      embedding_size=FLAGS.embedding_size, evaluation_interval=FLAGS.evaluation_interval, alternate=FLAGS.alternate)
 
     if FLAGS.train:
         chatbot.train()
