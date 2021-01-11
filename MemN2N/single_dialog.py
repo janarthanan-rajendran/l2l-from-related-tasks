@@ -311,7 +311,7 @@ class chatBot(object):
                         # print('primary cost', cost_t)
                         total_cost += cost_t
 
-                        r_start, r_end = random.sample(r_batches_r)
+                        r_start, r_end = random.sample(r_batches_r, 1)[0]
                         r_start_p, r_end_p = random.sample(r_batches_p, 1)[0]
                         r_s_p = trainS[r_start_p:r_end_p]
                         r_q_p = trainQ[r_start_p:r_end_p]
@@ -372,7 +372,7 @@ class chatBot(object):
         time_taken = time.process_time() - start_time
         print("Time taken", time_taken)
 
-    
+
     def test(self):
         """Runs testing on testing set data.
 
