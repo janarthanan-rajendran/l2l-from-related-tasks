@@ -193,7 +193,8 @@ class chatBot(object):
 
         config = tf.ConfigProto()
         config.gpu_options.allow_growth = True
-        
+        config.gpu_options.per_process_gpu_memory_fraction = 0.5
+
         self.sess = tf.Session(config=config)
 
         self.model = MemN2NDialog(self.has_qnet, self.batch_size, self.vocab_size, self.n_cand,
