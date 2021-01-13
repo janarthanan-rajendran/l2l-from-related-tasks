@@ -15,6 +15,8 @@ import random
 import time
 
 tf.flags.DEFINE_float("learning_rate", 0.001, "Learning rate for Adam Optimizer.")
+tf.flags.DEFINE_float("aux_learning_rate", 0.001, "Learning rate for aux Optimizer that updates anet using aux loss.")
+tf.flags.DEFINE_float("outer_learning_rate", 0.001, "Learning rate for qnet Optimizer that updates qnet")
 tf.flags.DEFINE_float("epsilon", 1e-8, "Epsilon value for Adam Optimizer.")
 tf.flags.DEFINE_float("max_grad_norm", 40.0, "Clip gradients to this norm.")
 tf.flags.DEFINE_integer("evaluation_interval", 10, "Evaluate and print results every x epochs")
@@ -30,6 +32,7 @@ tf.flags.DEFINE_string("data_dir", "../data/personalized-dialog-dataset/full", "
 tf.flags.DEFINE_string("test_data_dir", "../data/personalized-dialog-dataset/full", "Directory testing tasks")
 tf.flags.DEFINE_string("r_data_dir", "../data/dialog-bAbI-tasks", "Directory containing original bAbI tasks")
 tf.flags.DEFINE_string("model_dir", "gen/", "Directory containing memn2n model checkpoints")
+tf.flags.DEFINE_string("aux_opt", "adam", "optimizer for updating anet using aux loss")
 tf.flags.DEFINE_boolean('has_qnet', False, 'if True, add question network')
 tf.flags.DEFINE_boolean('train', True, 'if True, begin to train')
 tf.flags.DEFINE_boolean('sep_test', False, 'if True, load test data from a test data dir')
@@ -61,7 +64,10 @@ class chatBot(object):
                  save_vocab=False,
                  load_vocab=False,
                  alternate=True,
-                 only_aux=False):
+                 only_aux=False,
+                 aux_opt='adam',
+                 aux_learning_rate=0.001,
+                 outer_learning_rate=0.001):
         """Creates wrapper for training and testing a chatbot model.
 
         Args:
@@ -70,6 +76,8 @@ class chatBot(object):
             r_data_dir: Directory containing related task's data
             
             model_dir: Directory containing memn2n model checkpoints.
+
+            aux_opt: Optimizer for updating anet using aux loss.
 
             task_id: Personalized dialog task id, 1 <= id <= 5. Defaults to `1`.
 
@@ -108,6 +116,10 @@ class chatBot(object):
             alternate: If True alternate between primary and related every epoch
 
             only_aux: Update anet using only aux and update qnet
+
+            aux_learning_rate: lr of aux update to anet
+
+            outer_learning_rate: lr for update qnet
         """
 
         self.data_dir = data_dir
@@ -132,6 +144,9 @@ class chatBot(object):
         self.load_vocab = load_vocab
         self.alternate = alternate
         self.only_aux = only_aux
+        self.aux_opt = aux_opt
+        self.aux_learning_rate = aux_learning_rate
+        self.outer_learning_rate = outer_learning_rate
 
         candidates,self.candid2indx = load_candidates(self.data_dir, self.task_id, True)
         self.n_cand = len(candidates)
@@ -167,14 +182,26 @@ class chatBot(object):
         
         optimizer = tf.train.AdamOptimizer(
             learning_rate=self.learning_rate, epsilon=self.epsilon)
+
+        if self.aux_opt == 'sgd':
+            aux_optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.aux_learning_rate)
+        elif self.aux_opt == 'adam':
+            aux_optimizer = tf.train.AdamOptimizer(learning_rate=self.aux_learning_rate, epsilon=self.epsilon)
+
+        outer_optimizer = tf.train.AdamOptimizer(
+            learning_rate=self.outer_learning_rate, epsilon=self.epsilon)
+
+        config = tf.ConfigProto()
+        config.gpu_options.allow_growth = True
         
-        self.sess = tf.Session()
+        self.sess = tf.Session(config=config)
 
         self.model = MemN2NDialog(self.has_qnet, self.batch_size, self.vocab_size, self.n_cand,
                                   self.sentence_size, self.embedding_size,
                                   self.candidates_vec, self.candidate_sentence_size, session=self.sess,
                                   hops=self.hops, max_grad_norm=self.max_grad_norm,
-                                  optimizer=optimizer, task_id=task_id)
+                                  optimizer=optimizer, outer_optimizer= outer_optimizer, aux_optimizer=aux_optimizer, task_id=task_id,
+                                  inner_lr = self.aux_learning_rate)
 
         self.saver = tf.train.Saver(max_to_keep=50)
         
@@ -454,9 +481,10 @@ class chatBot(object):
         self.sess.close()
 
 if __name__ == '__main__':
-    
-    #gpus = tf.compat.v1.config.experimental.list_physical_devices('GPU')
-    #if gpus:
+
+    # # config = tf.ConfigProto()
+    # gpus = tf.config.experimental.list_physical_devices('GPU')
+    # if gpus:
     #    try:
     #        # Currently, memory growth needs to be the same across GPUs
     #        for gpu in gpus:
@@ -467,7 +495,7 @@ if __name__ == '__main__':
     #        # Memory growth must be set before GPUs have been initialized
     #        print(e)
 
-    #tf.config.experimental.set_memory_growth(gpu, True)
+    # tf.config.experimental.set_memory_growth(gpu, True)
 
     model_dir = 'model/' + str(FLAGS.task_id) + '/' + FLAGS.model_dir
     result_dir = 'result/' + str(FLAGS.task_id) + '/' + FLAGS.model_dir
@@ -480,7 +508,8 @@ if __name__ == '__main__':
                       epochs=FLAGS.epochs, hops=FLAGS.hops, save_vocab=FLAGS.save_vocab,
                       load_vocab=FLAGS.load_vocab, learning_rate=FLAGS.learning_rate,
                       embedding_size=FLAGS.embedding_size, evaluation_interval=FLAGS.evaluation_interval,
-                      alternate=FLAGS.alternate, only_aux=FLAGS.only_aux)
+                      alternate=FLAGS.alternate, only_aux=FLAGS.only_aux, aux_opt=FLAGS.aux_opt,
+                      aux_learning_rate=FLAGS.aux_learning_rate, outer_learning_rate=FLAGS.outer_learning_rate)
 
     if FLAGS.train:
         chatbot.train()

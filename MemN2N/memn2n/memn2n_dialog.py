@@ -21,7 +21,8 @@ class MemN2NDialog(object):
                  session=tf.Session(),
                  name='anet',
                  q_name = 'qnet',
-                 task_id=1):
+                 task_id=1,
+                 inner_lr=0.01):
         """Creates an End-To-End Memory Network
 
         Args:
@@ -85,7 +86,7 @@ class MemN2NDialog(object):
         self._name = name
         self._q_name = q_name
         self._candidates=candidates_vec
-        self.inner_lr = 0.01
+        self.inner_lr = inner_lr
 
         self._build_inputs()
         weights_anet, weights_anet_pred, weights_qnet = self._build_vars()
