@@ -8,6 +8,10 @@ from itertools import chain
 from six.moves import range, reduce
 import sys
 import tensorflow as tf
+
+config = tf.ConfigProto()
+config.gpu_options.allow_growth = True
+
 import numpy as np
 import os
 import pickle
@@ -191,9 +195,7 @@ class chatBot(object):
         outer_optimizer = tf.train.AdamOptimizer(
             learning_rate=self.outer_learning_rate, epsilon=self.epsilon)
 
-        config = tf.ConfigProto()
-        config.gpu_options.allow_growth = True
-        config.gpu_options.per_process_gpu_memory_fraction = 0.5
+        # config.gpu_options.per_process_gpu_memory_fraction = 0.5
 
         self.sess = tf.Session(config=config)
 
