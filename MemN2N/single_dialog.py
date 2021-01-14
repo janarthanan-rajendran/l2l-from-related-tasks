@@ -60,6 +60,7 @@ class chatBot(object):
                  batch_size=32,
                  learning_rate=0.001,
                  epsilon=1e-8,
+                 alpha=0.9,
                  max_grad_norm=40.0,
                  evaluation_interval=10,
                  hops=3,
@@ -101,6 +102,8 @@ class chatBot(object):
 
             epsilon: Epsilon value for Adam Optimizer. Defaults to `1e-8`.
 
+            alpha: decay of rmsprop optimizer.
+
             max_gradient_norm: Maximum L2 norm clipping value. Defaults to `40.0`.
 
             evaluation_interval: Evaluate and print results every x epochs. 
@@ -139,6 +142,7 @@ class chatBot(object):
         self.batch_size = batch_size
         self.learning_rate = learning_rate
         self.epsilon = epsilon
+        self.alpha = alpha
         self.max_grad_norm = max_grad_norm
         self.evaluation_interval = evaluation_interval
         self.hops = hops
@@ -191,6 +195,8 @@ class chatBot(object):
             aux_optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.aux_learning_rate)
         elif self.aux_opt == 'adam':
             aux_optimizer = tf.train.AdamOptimizer(learning_rate=self.aux_learning_rate, epsilon=self.epsilon)
+        elif self.aux_opt == 'rms':
+            aux_optimizer = tf.train.RMSPropOptimizer(learning_rate=self.aux_learning_rate, decay=self.alpha, epsilon=self.epsilon)
 
         outer_optimizer = tf.train.AdamOptimizer(
             learning_rate=self.outer_learning_rate, epsilon=self.epsilon)
@@ -204,7 +210,7 @@ class chatBot(object):
                                   self.candidates_vec, self.candidate_sentence_size, session=self.sess,
                                   hops=self.hops, max_grad_norm=self.max_grad_norm,
                                   optimizer=optimizer, outer_optimizer= outer_optimizer, aux_optimizer=aux_optimizer, task_id=task_id,
-                                  inner_lr = self.aux_learning_rate)
+                                  inner_lr = self.aux_learning_rate, aux_opt_name=self.aux_opt, alpha=self.alpha, epsilon=self.epsilon)
 
         self.saver = tf.train.Saver(max_to_keep=50)
         
@@ -512,7 +518,7 @@ if __name__ == '__main__':
                       load_vocab=FLAGS.load_vocab, learning_rate=FLAGS.learning_rate,
                       embedding_size=FLAGS.embedding_size, evaluation_interval=FLAGS.evaluation_interval,
                       alternate=FLAGS.alternate, only_aux=FLAGS.only_aux, aux_opt=FLAGS.aux_opt,
-                      aux_learning_rate=FLAGS.aux_learning_rate, outer_learning_rate=FLAGS.outer_learning_rate)
+                      aux_learning_rate=FLAGS.aux_learning_rate, outer_learning_rate=FLAGS.outer_learning_rate, epsilon=FLAGS.epsilon)
 
     if FLAGS.train:
         chatbot.train()

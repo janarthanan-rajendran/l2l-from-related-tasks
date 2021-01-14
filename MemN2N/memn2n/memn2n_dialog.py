@@ -22,7 +22,10 @@ class MemN2NDialog(object):
                  name='anet',
                  q_name = 'qnet',
                  task_id=1,
-                 inner_lr=0.01):
+                 inner_lr=0.01,
+                 aux_opt_name='adam',
+                 alpha=0.9,
+                 epsilon=1e-8):
         """Creates an End-To-End Memory Network
 
         Args:
@@ -67,6 +70,12 @@ class MemN2NDialog(object):
             session: Tensorflow Session the model is run with. Defaults to `tf.Session()`.
 
             name: Name of the End-To-End Memory Network. Defaults to `MemN2N`.
+
+            aux_opt_name: optimizer for auxiliary task update
+
+            alpha: decay or rmsprop
+
+            epsilon: epsilon of rmsprop and adam.
         """
 
         self._has_qnet = has_qnet
@@ -87,6 +96,9 @@ class MemN2NDialog(object):
         self._q_name = q_name
         self._candidates=candidates_vec
         self.inner_lr = inner_lr
+        self._aux_opt_name = aux_opt_name
+        self._alpha = alpha
+        self._epsilon = epsilon
 
         self._build_inputs()
         weights_anet, weights_anet_pred, weights_qnet = self._build_vars()
@@ -121,20 +133,53 @@ class MemN2NDialog(object):
 
 
         if self._has_qnet:
-            inner_grads = tf.gradients(inner_loss_op, list(weights_anet.values()))
-            inner_grads = [tf.clip_by_norm(grad, self._max_grad_norm) for grad in inner_grads]
-            inner_nil_grads = []
-            for g, v in zip(inner_grads, list(weights_anet.values())):
+            # update with auxiliary task
+            if self._aux_opt_name == 'rms':
+                aux_grads = tf.gradients(inner_loss_op, list(weights_anet.values()))
+                aux_grads_and_vars = zip(aux_grads, list(weights_anet.values()))
+            else:
+                aux_grads_and_vars = self._aux_opt.compute_gradients(inner_loss_op, list(weights_anet.values()))
+            aux_grads_and_vars = [(tf.clip_by_norm(g, self._max_grad_norm), v)
+                                    for g, v in aux_grads_and_vars]
+            # grads_and_vars = [(add_gradient_noise(g), v) for g,v in grads_and_vars]
+            aux_nil_grads_and_vars = []
+            for g, v in aux_grads_and_vars:
                 if v.name in self._nil_vars:
-                    inner_nil_grads.append(zero_nil_slot(g))
+                    aux_nil_grads_and_vars.append((zero_nil_slot(g), v))
                 else:
-                    inner_nil_grads.append(g)
-            inner_gradients = dict(zip(weights_anet.keys(), inner_nil_grads))
-            fast_anet_weights = dict(
-                zip(weights_anet.keys(), [
-                    weights_anet[key] - self.inner_lr * inner_gradients[key]
-                    for key in weights_anet.keys()
-                ]))
+                    aux_nil_grads_and_vars.append((g, v))
+            aux_train_op = self._aux_opt.apply_gradients(aux_nil_grads_and_vars, name="aux_train_op")
+
+            if self._aux_opt_name == 'rms':
+                inner_grads = tf.gradients(inner_loss_op, list(weights_anet.values()))
+                inner_grads = [tf.clip_by_norm(grad, self._max_grad_norm) for grad in inner_grads]
+                inner_nil_grads = []
+                for g, v in zip(inner_grads, list(weights_anet.values())):
+                    if v.name in self._nil_vars:
+                        inner_nil_grads.append(zero_nil_slot(g))
+                    else:
+                        inner_nil_grads.append(g)
+
+                rmss = [self._aux_opt.get_slot(var, 'rms') for var in list(weights_anet.values())]
+                fast_anet_weights = {}
+                for grad, rms, var, var_name in zip(inner_nil_grads, rmss, list(weights_anet.values()), list(weights_anet.keys())):
+                    ms = rms + (tf.square(grad) - rms) * (1 - self._alpha)
+                    fast_anet_weights[var_name] = var - self.inner_lr * grad / tf.sqrt(ms + self._epsilon)
+            else:
+                inner_grads = tf.gradients(inner_loss_op, list(weights_anet.values()))
+                inner_grads = [tf.clip_by_norm(grad, self._max_grad_norm) for grad in inner_grads]
+                inner_nil_grads = []
+                for g, v in zip(inner_grads, list(weights_anet.values())):
+                    if v.name in self._nil_vars:
+                        inner_nil_grads.append(zero_nil_slot(g))
+                    else:
+                        inner_nil_grads.append(g)
+                inner_gradients = dict(zip(weights_anet.keys(), inner_nil_grads))
+                fast_anet_weights = dict(
+                    zip(weights_anet.keys(), [
+                        weights_anet[key] - self.inner_lr * inner_gradients[key]
+                        for key in weights_anet.keys()
+                    ]))
 
             outer_logits, _ = self._inference({**fast_anet_weights, **weights_anet_pred}, self._p_stories, self._p_queries)
             outer_cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
@@ -155,19 +200,6 @@ class MemN2NDialog(object):
                 else:
                     outer_nil_grads_and_vars.append((g, v))
             outer_train_op = self._outer_opt.apply_gradients(outer_nil_grads_and_vars, name="outer_train_op")
-
-            # update with auxiliary task
-            aux_grads_and_vars = self._aux_opt.compute_gradients(inner_loss_op, list(weights_anet.values()))
-            aux_grads_and_vars = [(tf.clip_by_norm(g, self._max_grad_norm), v)
-                                    for g, v in aux_grads_and_vars]
-            # grads_and_vars = [(add_gradient_noise(g), v) for g,v in grads_and_vars]
-            aux_nil_grads_and_vars = []
-            for g, v in aux_grads_and_vars:
-                if v.name in self._nil_vars:
-                    aux_nil_grads_and_vars.append((zero_nil_slot(g), v))
-                else:
-                    aux_nil_grads_and_vars.append((g, v))
-            aux_train_op = self._aux_opt.apply_gradients(aux_nil_grads_and_vars, name="aux_train_op")
 
             # update with primary task data
             anet_params = tf.trainable_variables(self._name)
