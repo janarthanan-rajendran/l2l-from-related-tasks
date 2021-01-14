@@ -189,17 +189,17 @@ class chatBot(object):
                 FLAGS.test_data_dir, self.task_id, self.candid2indx, self.OOV)
         
         optimizer = tf.train.AdamOptimizer(
-            learning_rate=self.learning_rate, epsilon=self.epsilon)
+            learning_rate=self.learning_rate, epsilon=self.epsilon, name='opt')
 
         if self.aux_opt == 'sgd':
-            aux_optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.aux_learning_rate)
+            aux_optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.aux_learning_rate, name='aux_opt')
         elif self.aux_opt == 'adam':
-            aux_optimizer = tf.train.AdamOptimizer(learning_rate=self.aux_learning_rate, epsilon=self.epsilon)
+            aux_optimizer = tf.train.AdamOptimizer(learning_rate=self.aux_learning_rate, epsilon=self.epsilon, name='aux_opt')
         elif self.aux_opt == 'rms':
-            aux_optimizer = tf.train.RMSPropOptimizer(learning_rate=self.aux_learning_rate, decay=self.alpha, epsilon=self.epsilon)
+            aux_optimizer = tf.train.RMSPropOptimizer(learning_rate=self.aux_learning_rate, decay=self.alpha, epsilon=self.epsilon, name='aux_opt')
 
         outer_optimizer = tf.train.AdamOptimizer(
-            learning_rate=self.outer_learning_rate, epsilon=self.epsilon)
+            learning_rate=self.outer_learning_rate, epsilon=self.epsilon, name='outer_opt')
 
         # config.gpu_options.per_process_gpu_memory_fraction = 0.5
 
@@ -385,7 +385,6 @@ class chatBot(object):
                             # print('s', np.shape(s), 'q', np.shape(q), 'a', np.shape(a), 'q_a', np.shape(q_a))
                             outer_cost_t, aux_cost_t = self.model.q_batch_fit(r_s, r_q, r_a, r_q_a, r_s_p, r_q_p, r_a_p,
                                                                               False)  # related
-                            # outer_cost_t, aux_cost_t = self.model.q_batch_fit(s, q, a, q_a, s, q, a, False)  # related
                             cost_t = outer_cost_t
                             # print('outer_cost', outer_cost_t, 'aux_cost', aux_cost_t)
                             total_cost += cost_t

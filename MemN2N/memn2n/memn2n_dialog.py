@@ -139,6 +139,8 @@ class MemN2NDialog(object):
                 aux_grads_and_vars = zip(aux_grads, list(weights_anet.values()))
             else:
                 aux_grads_and_vars = self._aux_opt.compute_gradients(inner_loss_op, list(weights_anet.values()))
+                # aux_grads = tf.gradients(inner_loss_op, list(weights_anet.values()))
+                # aux_grads_and_vars = zip(aux_grads, list(weights_anet.values()))
             aux_grads_and_vars = [(tf.clip_by_norm(g, self._max_grad_norm), v)
                                     for g, v in aux_grads_and_vars]
             # grads_and_vars = [(add_gradient_noise(g), v) for g,v in grads_and_vars]
