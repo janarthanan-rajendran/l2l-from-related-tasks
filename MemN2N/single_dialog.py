@@ -36,6 +36,7 @@ tf.flags.DEFINE_string("data_dir", "../data/personalized-dialog-dataset/full", "
 tf.flags.DEFINE_string("test_data_dir", "../data/personalized-dialog-dataset/full", "Directory testing tasks")
 tf.flags.DEFINE_string("r_data_dir", "../data/dialog-bAbI-tasks", "Directory containing original bAbI tasks")
 tf.flags.DEFINE_string("model_dir", "gen/", "Directory containing memn2n model checkpoints")
+tf.flags.DEFINE_string("restore_model_dir", "gen/", "Directory restore for training")
 tf.flags.DEFINE_string("aux_opt", "adam", "optimizer for updating anet using aux loss")
 tf.flags.DEFINE_boolean('has_qnet', False, 'if True, add question network')
 tf.flags.DEFINE_boolean('train', True, 'if True, begin to train')
@@ -45,6 +46,8 @@ tf.flags.DEFINE_boolean('save_vocab', False, 'if True, saves vocabulary')
 tf.flags.DEFINE_boolean('load_vocab', False, 'if True, loads vocabulary instead of building it')
 tf.flags.DEFINE_boolean('alternate', True, 'if True, alternate training between primary and related every epoch, else do it every batch')
 tf.flags.DEFINE_boolean('only_aux', False, 'if True, train anet using only aux, update qnet using full primary task data')
+tf.flags.DEFINE_boolean('only_primary', False, 'if True, train anet using only primary')
+
 
 
 FLAGS = tf.flags.FLAGS
@@ -72,7 +75,8 @@ class chatBot(object):
                  only_aux=False,
                  aux_opt='adam',
                  aux_learning_rate=0.001,
-                 outer_learning_rate=0.001):
+                 outer_learning_rate=0.001,
+                 only_primary=False):
         """Creates wrapper for training and testing a chatbot model.
 
         Args:
@@ -155,6 +159,7 @@ class chatBot(object):
         self.aux_opt = aux_opt
         self.aux_learning_rate = aux_learning_rate
         self.outer_learning_rate = outer_learning_rate
+        self.only_primary = only_primary
 
         candidates,self.candid2indx = load_candidates(self.data_dir, self.task_id, True)
         self.n_cand = len(candidates)
@@ -268,6 +273,14 @@ class chatBot(object):
 
         Performs validation at given evaluation intervals.
         """
+        model_dir = 'model/' + str(FLAGS.task_id) + '/' + FLAGS.restore_model_dir
+        ckpt = tf.train.get_checkpoint_state(model_dir)
+        if ckpt and ckpt.model_checkpoint_path:
+            self.saver.restore(self.sess, ckpt.model_checkpoint_path)
+            print("Restored checkpoint")
+        else:
+            print("...no checkpoint found...")
+
         trainS, trainQ, trainA, trainqA = vectorize_data(
             self.trainData, self.word_idx, self.sentence_size, self.candidate_sentence_size,
             self.batch_size, self.n_cand, self.memory_size)
@@ -319,6 +332,7 @@ class chatBot(object):
                 if self.only_aux:
                     count = 0
                     for r_start, r_end in r_batches_r:
+                        count +=1
                         start, end = random.sample(batches, 1)[0]
                         r_s_p = trainS[start:end]
                         r_q_p = trainQ[start:end]
@@ -335,6 +349,14 @@ class chatBot(object):
                         cost_t = outer_cost_t
                         if count%100 == 0:
                             print('outer_cost', outer_cost_t, 'aux_cost', aux_cost_t)
+                        total_cost += cost_t
+                elif self.only_primary:
+                    for start, end in batches:
+                        s = trainS[start:end]
+                        q = trainQ[start:end]
+                        a = trainA[start:end]
+                        # q_a = trainqA[start:end]
+                        cost_t = self.model.batch_fit(s, q, a)
                         total_cost += cost_t
                 else:
                     if self.alternate:
