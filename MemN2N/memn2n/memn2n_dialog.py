@@ -295,9 +295,9 @@ class MemN2NDialog(object):
             weights_anet['A'] = tf.Variable(A, name="A")
             # self.H = tf.Variable(self._init([self._embedding_size, self._embedding_size]), name="H")
             weights_anet['H'] = tf.Variable(self._init([self._embedding_size, self._embedding_size]), name="H")
-            if self._has_qnet:
-                weights_anet_aux['H_aux'] = tf.Variable(self._init([self._embedding_size, self._embedding_size]), name="H_aux")
-                weights_anet_pred['H_p'] = tf.Variable(self._init([self._embedding_size, self._embedding_size]), name="H_p")
+            # if self._has_qnet:
+            #     weights_anet_aux['H_aux'] = tf.Variable(self._init([self._embedding_size, self._embedding_size]), name="H_aux")
+            #     weights_anet_pred['H_p'] = tf.Variable(self._init([self._embedding_size, self._embedding_size]), name="H_p")
             W = tf.concat(axis=0, values=[ nil_word_slot, self._init([self._vocab_size-1, self._embedding_size]) ])
             # self.W = tf.Variable(W, name="W")
             weights_anet_pred['W'] = tf.Variable(W, name="W")
@@ -366,12 +366,12 @@ class MemN2NDialog(object):
             candidates_emb=tf.nn.embedding_lookup(weights['W'], self._candidates)
             candidates_emb_sum=tf.reduce_sum(candidates_emb,1)
 
-            if self._has_qnet:
-                u_k_p = tf.matmul(u_k, weights['H_p'])
-                u_k_aux = tf.matmul(u_k, weights['H_aux'])
-                return tf.matmul(u_k_p, tf.transpose(candidates_emb_sum)), u_k_aux
-            else:
-                return tf.matmul(u_k, tf.transpose(candidates_emb_sum)), u_k
+            # if self._has_qnet:
+            #     u_k_p = tf.matmul(u_k, weights['H_p'])
+            #     u_k_aux = tf.matmul(u_k, weights['H_aux'])
+            #     return tf.matmul(u_k_p, tf.transpose(candidates_emb_sum)), u_k_aux
+            # else:
+            return tf.matmul(u_k, tf.transpose(candidates_emb_sum)), u_k
 
     def _q_inference(self, weights, stories, queries, q_answers):
         if self._has_qnet:
