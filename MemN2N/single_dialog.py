@@ -47,8 +47,7 @@ tf.flags.DEFINE_boolean('load_vocab', False, 'if True, loads vocabulary instead 
 tf.flags.DEFINE_boolean('alternate', True, 'if True, alternate training between primary and related every epoch, else do it every batch')
 tf.flags.DEFINE_boolean('only_aux', False, 'if True, train anet using only aux, update qnet using full primary task data')
 tf.flags.DEFINE_boolean('only_primary', False, 'if True, train anet using only primary')
-
-
+tf.flags.DEFINE_boolean('restore', False, 'if True,restore for training')
 
 FLAGS = tf.flags.FLAGS
 print("Started Task:", FLAGS.task_id)
@@ -273,13 +272,15 @@ class chatBot(object):
 
         Performs validation at given evaluation intervals.
         """
-        model_dir = 'model/' + str(FLAGS.task_id) + '/' + FLAGS.restore_model_dir
-        ckpt = tf.train.get_checkpoint_state(model_dir)
-        if ckpt and ckpt.model_checkpoint_path:
-            self.saver.restore(self.sess, ckpt.model_checkpoint_path)
-            print("Restored checkpoint")
-        else:
-            print("...no checkpoint found...")
+
+        if FLAGS.restore:
+            model_dir = 'model/' + str(FLAGS.task_id) + '/' + FLAGS.restore_model_dir
+            ckpt = tf.train.get_checkpoint_state(model_dir)
+            if ckpt and ckpt.model_checkpoint_path:
+                self.saver.restore(self.sess, ckpt.model_checkpoint_path)
+                print("Restored checkpoint")
+            else:
+                print("...no checkpoint found...")
 
         trainS, trainQ, trainA, trainqA = vectorize_data(
             self.trainData, self.word_idx, self.sentence_size, self.candidate_sentence_size,
