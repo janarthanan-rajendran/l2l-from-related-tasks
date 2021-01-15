@@ -317,6 +317,7 @@ class chatBot(object):
                 np.random.shuffle(r_batches_r)
 
                 if self.only_aux:
+                    count = 0
                     for r_start, r_end in r_batches_r:
                         start, end = random.sample(batches, 1)[0]
                         r_s_p = trainS[start:end]
@@ -332,7 +333,8 @@ class chatBot(object):
                                                                           False)  # related
                         # outer_cost_t, aux_cost_t = self.model.q_batch_fit(s, q, a, q_a, s, q, a, False)  # related
                         cost_t = outer_cost_t
-                        print('outer_cost', outer_cost_t, 'aux_cost', aux_cost_t)
+                        if count%100 == 0:
+                            print('outer_cost', outer_cost_t, 'aux_cost', aux_cost_t)
                         total_cost += cost_t
                 else:
                     if self.alternate:
@@ -363,13 +365,16 @@ class chatBot(object):
                                 # print('outer_cost', outer_cost_t, 'aux_cost', aux_cost_t)
                                 total_cost += cost_t
                     else:
+                        count = 0
                         for start, end in p_batches:
+                            count +=1
                             s = trainS[start:end]
                             q = trainQ[start:end]
                             a = trainA[start:end]
                             q_a = trainqA[start:end]
                             cost_t = self.model.q_batch_fit(s, q, a, q_a, None, None, None, True)  # primary
-                            print('primary cost', cost_t)
+                            if count%100 == 0:
+                                print('primary cost', cost_t)
                             total_cost += cost_t
 
                             r_start, r_end = random.sample(r_batches_r, 1)[0]
@@ -386,7 +391,8 @@ class chatBot(object):
                             outer_cost_t, aux_cost_t = self.model.q_batch_fit(r_s, r_q, r_a, r_q_a, r_s_p, r_q_p, r_a_p,
                                                                               False)  # related
                             cost_t = outer_cost_t
-                            print('outer_cost', outer_cost_t, 'aux_cost', aux_cost_t)
+                            if count%100 == 0:
+                                print('outer_cost', outer_cost_t, 'aux_cost', aux_cost_t)
                             total_cost += cost_t
             else:
                 for start, end in batches:
