@@ -22,7 +22,7 @@ tf.flags.DEFINE_float("learning_rate", 0.001, "Learning rate for Adam Optimizer.
 tf.flags.DEFINE_float("aux_learning_rate", 0.001, "Learning rate for aux Optimizer that updates anet using aux loss.")
 tf.flags.DEFINE_float("outer_learning_rate", 0.001, "Learning rate for qnet Optimizer that updates qnet")
 tf.flags.DEFINE_float("epsilon", 1e-8, "Epsilon value for Adam Optimizer.")
-tf.flags.DEFINE_float("max_grad_norm", 40.0, "Clip gradients to this norm.")
+tf.flags.DEFINE_float("max_grad_norm", 0.5, "Clip gradients to this norm.")
 tf.flags.DEFINE_integer("evaluation_interval", 10, "Evaluate and print results every x epochs")
 tf.flags.DEFINE_integer("batch_size", 32, "Batch size for training.")
 tf.flags.DEFINE_integer("hops", 3, "Number of hops in the Memory Network.")
@@ -61,7 +61,7 @@ class chatBot(object):
                  learning_rate=0.001,
                  epsilon=1e-8,
                  alpha=0.9,
-                 max_grad_norm=40.0,
+                 max_grad_norm=0.5,
                  evaluation_interval=10,
                  hops=3,
                  epochs=200,
@@ -104,7 +104,7 @@ class chatBot(object):
 
             alpha: decay of rmsprop optimizer.
 
-            max_gradient_norm: Maximum L2 norm clipping value. Defaults to `40.0`.
+            max_gradient_norm: Maximum L2 norm clipping value. Defaults to `0.5`.
 
             evaluation_interval: Evaluate and print results every x epochs. 
             Defaults to `10`.
@@ -332,7 +332,7 @@ class chatBot(object):
                                                                           False)  # related
                         # outer_cost_t, aux_cost_t = self.model.q_batch_fit(s, q, a, q_a, s, q, a, False)  # related
                         cost_t = outer_cost_t
-                        # print('outer_cost', outer_cost_t, 'aux_cost', aux_cost_t)
+                        print('outer_cost', outer_cost_t, 'aux_cost', aux_cost_t)
                         total_cost += cost_t
                 else:
                     if self.alternate:
@@ -369,7 +369,7 @@ class chatBot(object):
                             a = trainA[start:end]
                             q_a = trainqA[start:end]
                             cost_t = self.model.q_batch_fit(s, q, a, q_a, None, None, None, True)  # primary
-                            # print('primary cost', cost_t)
+                            print('primary cost', cost_t)
                             total_cost += cost_t
 
                             r_start, r_end = random.sample(r_batches_r, 1)[0]
@@ -386,7 +386,7 @@ class chatBot(object):
                             outer_cost_t, aux_cost_t = self.model.q_batch_fit(r_s, r_q, r_a, r_q_a, r_s_p, r_q_p, r_a_p,
                                                                               False)  # related
                             cost_t = outer_cost_t
-                            # print('outer_cost', outer_cost_t, 'aux_cost', aux_cost_t)
+                            print('outer_cost', outer_cost_t, 'aux_cost', aux_cost_t)
                             total_cost += cost_t
             else:
                 for start, end in batches:
