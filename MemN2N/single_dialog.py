@@ -21,24 +21,25 @@ import time
 tf.flags.DEFINE_float("learning_rate", 0.001, "Learning rate for Adam Optimizer.")
 tf.flags.DEFINE_float("aux_learning_rate", 0.001, "Learning rate for aux Optimizer that updates anet using aux loss.")
 tf.flags.DEFINE_float("outer_learning_rate", 0.001, "Learning rate for qnet Optimizer that updates qnet")
-tf.flags.DEFINE_float("epsilon", 1e-8, "Epsilon value for Adam Optimizer.")
+tf.flags.DEFINE_float("epsilon", 1e-8, "Epsilon value for Adam, rms Optimizer.")
 tf.flags.DEFINE_float("max_grad_norm", 0.5, "Clip gradients to this norm.")
 tf.flags.DEFINE_integer("evaluation_interval", 10, "Evaluate and print results every x epochs")
 tf.flags.DEFINE_integer("batch_size", 32, "Batch size for training.")
 tf.flags.DEFINE_integer("hops", 3, "Number of hops in the Memory Network.")
-tf.flags.DEFINE_integer("epochs", 200, "Number of epochs to train for.")
+tf.flags.DEFINE_integer("epochs", 2000, "Number of epochs to train for.")
 tf.flags.DEFINE_integer("embedding_size", 20, "Embedding size for embedding matrices.")
 tf.flags.DEFINE_integer("memory_size", 250, "Maximum size of memory.")
-tf.flags.DEFINE_integer("task_id", 1, "task id, 1 <= id <= 5")
+tf.flags.DEFINE_integer("task_id", 5, "task id, 1 <= id <= 5")
 tf.flags.DEFINE_integer("r_task_id", 5, "task id of the related task, 1 <= id <= 5")
 tf.flags.DEFINE_integer("random_state", None, "Random state.")
 tf.flags.DEFINE_string("data_dir", "../data/personalized-dialog-dataset/full", "Directory containing bAbI tasks")
 tf.flags.DEFINE_string("test_data_dir", "../data/personalized-dialog-dataset/full", "Directory testing tasks")
 tf.flags.DEFINE_string("r_data_dir", "../data/dialog-bAbI-tasks", "Directory containing original bAbI tasks")
 tf.flags.DEFINE_string("model_dir", "gen/", "Directory containing memn2n model checkpoints")
-tf.flags.DEFINE_string("restore_model_dir", "gen/", "Directory restore for training")
+tf.flags.DEFINE_string("restore_model_dir", "gen/", "Directory containing model for restore for training")
+tf.flags.DEFINE_boolean('restore', False, 'if True,restore for training')
 tf.flags.DEFINE_string("aux_opt", "adam", "optimizer for updating anet using aux loss")
-tf.flags.DEFINE_boolean('has_qnet', False, 'if True, add question network')
+tf.flags.DEFINE_boolean('has_qnet', True, 'if True, add question network')
 tf.flags.DEFINE_boolean('train', True, 'if True, begin to train')
 tf.flags.DEFINE_boolean('sep_test', False, 'if True, load test data from a test data dir')
 tf.flags.DEFINE_boolean('OOV', False, 'if True, use OOV test set')
@@ -47,7 +48,6 @@ tf.flags.DEFINE_boolean('load_vocab', False, 'if True, loads vocabulary instead 
 tf.flags.DEFINE_boolean('alternate', True, 'if True, alternate training between primary and related every epoch, else do it every batch')
 tf.flags.DEFINE_boolean('only_aux', False, 'if True, train anet using only aux, update qnet using full primary task data')
 tf.flags.DEFINE_boolean('only_primary', False, 'if True, train anet using only primary')
-tf.flags.DEFINE_boolean('restore', False, 'if True,restore for training')
 
 FLAGS = tf.flags.FLAGS
 print("Started Task:", FLAGS.task_id)
@@ -130,6 +130,8 @@ class chatBot(object):
             aux_learning_rate: lr of aux update to anet
 
             outer_learning_rate: lr for update qnet
+
+            only_primary: train on only primary data
         """
 
         self.data_dir = data_dir
@@ -201,11 +203,11 @@ class chatBot(object):
             aux_optimizer = tf.train.AdamOptimizer(learning_rate=self.aux_learning_rate, epsilon=self.epsilon, name='aux_opt')
         elif self.aux_opt == 'rms':
             aux_optimizer = tf.train.RMSPropOptimizer(learning_rate=self.aux_learning_rate, decay=self.alpha, epsilon=self.epsilon, name='aux_opt')
+        else:
+            print("unknown aux optimizer")
 
         outer_optimizer = tf.train.AdamOptimizer(
             learning_rate=self.outer_learning_rate, epsilon=self.epsilon, name='outer_opt')
-
-        # config.gpu_options.per_process_gpu_memory_fraction = 0.5
 
         self.sess = tf.Session(config=config)
 
@@ -213,8 +215,8 @@ class chatBot(object):
                                   self.sentence_size, self.embedding_size,
                                   self.candidates_vec, self.candidate_sentence_size, session=self.sess,
                                   hops=self.hops, max_grad_norm=self.max_grad_norm,
-                                  optimizer=optimizer, outer_optimizer= outer_optimizer, aux_optimizer=aux_optimizer, task_id=task_id,
-                                  inner_lr = self.aux_learning_rate, aux_opt_name=self.aux_opt, alpha=self.alpha, epsilon=self.epsilon)
+                                  optimizer=optimizer, outer_optimizer=outer_optimizer, aux_optimizer=aux_optimizer, task_id=task_id,
+                                  inner_lr=self.aux_learning_rate, aux_opt_name=self.aux_opt, alpha=self.alpha, epsilon=self.epsilon)
 
         self.saver = tf.train.Saver(max_to_keep=50)
         
@@ -272,7 +274,6 @@ class chatBot(object):
 
         Performs validation at given evaluation intervals.
         """
-
         if FLAGS.restore:
             model_dir = 'model/' + str(FLAGS.task_id) + '/' + FLAGS.restore_model_dir
             ckpt = tf.train.get_checkpoint_state(model_dir)
@@ -290,6 +291,7 @@ class chatBot(object):
                 self.r_trainData, self.word_idx, self.sentence_size, self.candidate_sentence_size,
                 self.batch_size, self.r_n_cand, self.memory_size)
             n_r_train = len(r_trainS)
+            print("Related Task Trainign Size", n_r_train)
 
         valS, valQ, valA, _ = vectorize_data(
             self.valData, self.word_idx, self.sentence_size, self.candidate_sentence_size,
@@ -308,13 +310,6 @@ class chatBot(object):
             np.random.shuffle(batches)
             p_batches = batches[:int(len(batches)/2)]
             r_batches_p = batches[int(len(batches)/2):]
-            # p_batches = zip(range(0, int(n_train/2) - self.batch_size, self.batch_size),
-            #               range(self.batch_size, int(n_train/2), self.batch_size))
-            # p_batches = [(start, end) for start, end in p_batches]
-            # # primary data for the related tasks training (qnet training)
-            # r_batches_p = zip(range(int(n_train/2), n_train - self.batch_size, self.batch_size),
-            #               range(int(n_train/2) + self.batch_size, n_train, self.batch_size))
-            # r_batches_p = [(start, end) for start, end in r_batches_p]
             r_batches_r = zip(range(0, n_r_train-self.batch_size, self.batch_size),
                           range(self.batch_size, n_r_train, self.batch_size))
             r_batches_r = [(start, end) for start, end in r_batches_r]
@@ -329,7 +324,6 @@ class chatBot(object):
                 np.random.shuffle(p_batches)
                 np.random.shuffle(r_batches_p)
                 np.random.shuffle(r_batches_r)
-
                 if self.only_aux:
                     count = 0
                     for r_start, r_end in r_batches_r:
@@ -343,10 +337,7 @@ class chatBot(object):
                         r_q = r_trainQ[r_start:r_end]
                         r_a = r_trainA[r_start:r_end]
                         r_q_a = r_trainqA[r_start:r_end]
-                        # print('s', np.shape(s), 'q', np.shape(q), 'a', np.shape(a), 'q_a', np.shape(q_a))
-                        outer_cost_t, aux_cost_t = self.model.q_batch_fit(r_s, r_q, r_a, r_q_a, r_s_p, r_q_p, r_a_p,
-                                                                          False)  # related
-                        # outer_cost_t, aux_cost_t = self.model.q_batch_fit(s, q, a, q_a, s, q, a, False)  # related
+                        outer_cost_t, aux_cost_t = self.model.q_batch_fit(r_s, r_q, r_a, r_q_a, r_s_p, r_q_p, r_a_p, False)  # related
                         cost_t = outer_cost_t
                         if count%100 == 0:
                             print('outer_cost', outer_cost_t, 'aux_cost', aux_cost_t)
@@ -366,8 +357,8 @@ class chatBot(object):
                                 s = trainS[start:end]
                                 q = trainQ[start:end]
                                 a = trainA[start:end]
-                                q_a = trainqA[start:end]
-                                cost_t = self.model.q_batch_fit(s, q, a, q_a, None, None, None, True)  # primary
+                                # q_a = trainqA[start:end]
+                                cost_t = self.model.q_batch_fit(s, q, a, None, None, None, None, True)  # primary
                                 # print('primary cost', cost_t)
                                 total_cost += cost_t
                         else:
@@ -381,9 +372,7 @@ class chatBot(object):
                                 r_q = r_trainQ[r_start:r_end]
                                 r_a = r_trainA[r_start:r_end]
                                 r_q_a = r_trainqA[r_start:r_end]
-                                # print('s', np.shape(s), 'q', np.shape(q), 'a', np.shape(a), 'q_a', np.shape(q_a))
                                 outer_cost_t, aux_cost_t = self.model.q_batch_fit(r_s, r_q, r_a, r_q_a, r_s_p, r_q_p, r_a_p, False)  # related
-                                # outer_cost_t, aux_cost_t = self.model.q_batch_fit(s, q, a, q_a, s, q, a, False)  # related
                                 cost_t = outer_cost_t
                                 # print('outer_cost', outer_cost_t, 'aux_cost', aux_cost_t)
                                 total_cost += cost_t
@@ -395,7 +384,7 @@ class chatBot(object):
                             q = trainQ[start:end]
                             a = trainA[start:end]
                             q_a = trainqA[start:end]
-                            cost_t = self.model.q_batch_fit(s, q, a, q_a, None, None, None, True)  # primary
+                            cost_t = self.model.q_batch_fit(s, q, a, None, None, None, None, True)  # primary
                             if count%100 == 0:
                                 print('primary cost', cost_t)
                             total_cost += cost_t
@@ -410,9 +399,7 @@ class chatBot(object):
                             r_q = r_trainQ[r_start:r_end]
                             r_a = r_trainA[r_start:r_end]
                             r_q_a = r_trainqA[r_start:r_end]
-                            # print('s', np.shape(s), 'q', np.shape(q), 'a', np.shape(a), 'q_a', np.shape(q_a))
-                            outer_cost_t, aux_cost_t = self.model.q_batch_fit(r_s, r_q, r_a, r_q_a, r_s_p, r_q_p, r_a_p,
-                                                                              False)  # related
+                            outer_cost_t, aux_cost_t = self.model.q_batch_fit(r_s, r_q, r_a, r_q_a, r_s_p, r_q_p, r_a_p, False)  # related
                             cost_t = outer_cost_t
                             if count%100 == 0:
                                 print('outer_cost', outer_cost_t, 'aux_cost', aux_cost_t)
@@ -427,7 +414,7 @@ class chatBot(object):
                     total_cost += cost_t
             if t % self.evaluation_interval == 0:
                 # Perform validation
-                if self.has_qnet and not self.only_aux:
+                if self.has_qnet and not self.only_aux and not self.only_primary:
                     train_preds = self.batch_predict(trainS[:int(n_train/2)],trainQ[:int(n_train/2)],int(n_train/2))
                     train_acc = metrics.accuracy_score(np.array(train_preds), trainA[:int(n_train/2)])
                 else:
@@ -519,34 +506,21 @@ class chatBot(object):
 
 if __name__ == '__main__':
 
-    # # config = tf.ConfigProto()
-    # gpus = tf.config.experimental.list_physical_devices('GPU')
-    # if gpus:
-    #    try:
-    #        # Currently, memory growth needs to be the same across GPUs
-    #        for gpu in gpus:
-    #            tf.config.experimental.set_memory_growth(gpu, True)
-    #        logical_gpus = tf.config.experimental.list_logical_devices('GPU')
-    #        print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
-    #    except RuntimeError as e:
-    #        # Memory growth must be set before GPUs have been initialized
-    #        print(e)
-
-    # tf.config.experimental.set_memory_growth(gpu, True)
-
     model_dir = 'model/' + str(FLAGS.task_id) + '/' + FLAGS.model_dir
     result_dir = 'result/' + str(FLAGS.task_id) + '/' + FLAGS.model_dir
     if not os.path.exists(model_dir):
         os.makedirs(model_dir)
     if not os.path.exists(result_dir):
         os.makedirs(result_dir)
+
     chatbot = chatBot(FLAGS.data_dir, FLAGS.r_data_dir, model_dir, result_dir, FLAGS.task_id, FLAGS.r_task_id, OOV=FLAGS.OOV,
-                      has_qnet=FLAGS.has_qnet, batch_size=FLAGS.batch_size, memory_size=FLAGS.memory_size,
+                      has_qnet=FLAGS.has_qnet, batch_size=FLAGS.batch_size, memory_size=FLAGS.memory_size, random_state=FLAGS.random_state,
                       epochs=FLAGS.epochs, hops=FLAGS.hops, save_vocab=FLAGS.save_vocab,
                       load_vocab=FLAGS.load_vocab, learning_rate=FLAGS.learning_rate,
                       embedding_size=FLAGS.embedding_size, evaluation_interval=FLAGS.evaluation_interval,
                       alternate=FLAGS.alternate, only_aux=FLAGS.only_aux, aux_opt=FLAGS.aux_opt,
-                      aux_learning_rate=FLAGS.aux_learning_rate, outer_learning_rate=FLAGS.outer_learning_rate, epsilon=FLAGS.epsilon)
+                      aux_learning_rate=FLAGS.aux_learning_rate, outer_learning_rate=FLAGS.outer_learning_rate,
+                      epsilon=FLAGS.epsilon, only_primary=FLAGS.only_primary, max_grad_norm=FLAGS.max_grad_norm)
 
     if FLAGS.train:
         chatbot.train()
