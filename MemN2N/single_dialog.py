@@ -39,6 +39,7 @@ tf.flags.DEFINE_string("model_dir", "gen/", "Directory containing memn2n model c
 tf.flags.DEFINE_string("restore_model_dir", "gen/", "Directory containing model for restore for training")
 tf.flags.DEFINE_boolean('restore', False, 'if True,restore for training')
 tf.flags.DEFINE_string("aux_opt", "adam", "optimizer for updating anet using aux loss")
+tf.flags.DEFINE_string("aux_nonlin", None, "nonlinearity at the end of aux prediction/target, arctan")
 tf.flags.DEFINE_boolean('has_qnet', True, 'if True, add question network')
 tf.flags.DEFINE_boolean('train', True, 'if True, begin to train')
 tf.flags.DEFINE_boolean('sep_test', False, 'if True, load test data from a test data dir')
@@ -48,6 +49,7 @@ tf.flags.DEFINE_boolean('load_vocab', False, 'if True, loads vocabulary instead 
 tf.flags.DEFINE_boolean('alternate', True, 'if True, alternate training between primary and related every epoch, else do it every batch')
 tf.flags.DEFINE_boolean('only_aux', False, 'if True, train anet using only aux, update qnet using full primary task data')
 tf.flags.DEFINE_boolean('only_primary', False, 'if True, train anet using only primary')
+
 
 FLAGS = tf.flags.FLAGS
 print("Started Task:", FLAGS.task_id)
@@ -75,7 +77,8 @@ class chatBot(object):
                  aux_opt='adam',
                  aux_learning_rate=0.001,
                  outer_learning_rate=0.001,
-                 only_primary=False):
+                 only_primary=False,
+                 aux_nonlin=None):
         """Creates wrapper for training and testing a chatbot model.
 
         Args:
@@ -132,6 +135,8 @@ class chatBot(object):
             outer_learning_rate: lr for update qnet
 
             only_primary: train on only primary data
+
+            aux_nonlin: non linearity at the end of aux pred/targ
         """
 
         self.data_dir = data_dir
@@ -161,6 +166,7 @@ class chatBot(object):
         self.aux_learning_rate = aux_learning_rate
         self.outer_learning_rate = outer_learning_rate
         self.only_primary = only_primary
+        self.aux_nonlin = aux_nonlin
 
         candidates,self.candid2indx = load_candidates(self.data_dir, self.task_id, True)
         self.n_cand = len(candidates)
@@ -216,7 +222,7 @@ class chatBot(object):
                                   self.candidates_vec, self.candidate_sentence_size, session=self.sess,
                                   hops=self.hops, max_grad_norm=self.max_grad_norm,
                                   optimizer=optimizer, outer_optimizer=outer_optimizer, aux_optimizer=aux_optimizer, task_id=task_id,
-                                  inner_lr=self.aux_learning_rate, aux_opt_name=self.aux_opt, alpha=self.alpha, epsilon=self.epsilon)
+                                  inner_lr=self.aux_learning_rate, aux_opt_name=self.aux_opt, alpha=self.alpha, epsilon=self.epsilon, aux_nonlin=self.aux_nonlin)
 
         self.saver = tf.train.Saver(max_to_keep=50)
         
@@ -520,7 +526,7 @@ if __name__ == '__main__':
                       embedding_size=FLAGS.embedding_size, evaluation_interval=FLAGS.evaluation_interval,
                       alternate=FLAGS.alternate, only_aux=FLAGS.only_aux, aux_opt=FLAGS.aux_opt,
                       aux_learning_rate=FLAGS.aux_learning_rate, outer_learning_rate=FLAGS.outer_learning_rate,
-                      epsilon=FLAGS.epsilon, only_primary=FLAGS.only_primary, max_grad_norm=FLAGS.max_grad_norm)
+                      epsilon=FLAGS.epsilon, only_primary=FLAGS.only_primary, max_grad_norm=FLAGS.max_grad_norm, aux_nonlin=FLAGS.aux_nonlin)
 
     if FLAGS.train:
         chatbot.train()

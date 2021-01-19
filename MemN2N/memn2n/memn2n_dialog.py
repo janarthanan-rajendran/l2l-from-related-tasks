@@ -25,7 +25,8 @@ class MemN2NDialog(object):
                  inner_lr=0.01,
                  aux_opt_name='adam',
                  alpha=0.9,
-                 epsilon=1e-8):
+                 epsilon=1e-8,
+                 aux_nonlin=None):
         """Creates an End-To-End Memory Network
 
         Args:
@@ -76,6 +77,8 @@ class MemN2NDialog(object):
             alpha: decay or rmsprop
 
             epsilon: epsilon of rmsprop and adam.
+
+            aux_nonlin: non-linearity at the end of aux pred/target
         """
 
         self._has_qnet = has_qnet
@@ -100,13 +103,14 @@ class MemN2NDialog(object):
         self._aux_opt_name = aux_opt_name
         self._alpha = alpha
         self._epsilon = epsilon
+        self._aux_nonlin = aux_nonlin
 
-        if self._has_qnet:
-            self._shared_context_w = True
-            self._shared_answer_w = True
-        else:
-            self._shared_context_w = False
-            self._shared_answer_w = False
+        # if self._has_qnet:
+        #     self._shared_context_w = True
+        #     self._shared_answer_w = True
+        # else:
+        self._shared_context_w = False
+        self._shared_answer_w = False
 
         self._build_inputs()
         weights_anet, weights_anet_pred, weights_anet_aux, weights_qnet, weights_anet_qnet, weights_anet_pred_qnet = self._build_vars()
@@ -360,7 +364,10 @@ class MemN2NDialog(object):
 
             if self._has_qnet:
                 u_k_p = tf.matmul(u_k, weights['H_p'])
-                u_k_aux = tf.matmul(u_k, weights['H_aux'])
+                if self._aux_nonlin == 'arctan':
+                    u_k_aux = tf.math.atan(tf.matmul(u_k, weights['H_aux']))
+                else:
+                    u_k_aux = tf.math.atan(tf.matmul(u_k, weights['H_aux']))
                 return tf.matmul(u_k_p, tf.transpose(candidates_emb_sum)), u_k_aux
             else:
                 return tf.matmul(u_k, tf.transpose(candidates_emb_sum)), u_k
@@ -422,7 +429,10 @@ class MemN2NDialog(object):
                 # q_candidates_emb_sum = tf.reduce_sum(q_candidates_emb, 1)
 
                 # q_question_targ = tf.matmul(q_u_k, weights['ques_W'])
-                q_answer_targ = tf.matmul(q_u_k, weights['ans_W'])
+                if self._aux_nonlin == 'arctan':
+                    q_answer_targ = tf.math.atan(tf.matmul(q_u_k, weights['ans_W']))
+                else:
+                    q_answer_targ = tf.matmul(q_u_k, weights['ans_W'])
 
         return [], q_answer_targ
 
