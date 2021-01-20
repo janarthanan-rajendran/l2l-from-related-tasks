@@ -26,7 +26,7 @@ tf.flags.DEFINE_float("max_grad_norm", 0.5, "Clip gradients to this norm.")
 tf.flags.DEFINE_integer("evaluation_interval", 10, "Evaluate and print results every x epochs")
 tf.flags.DEFINE_integer("batch_size", 32, "Batch size for training.")
 tf.flags.DEFINE_integer("hops", 3, "Number of hops in the Memory Network.")
-tf.flags.DEFINE_integer("epochs", 2000, "Number of epochs to train for.")
+tf.flags.DEFINE_integer("epochs", 200, "Number of epochs to train for.")
 tf.flags.DEFINE_integer("embedding_size", 20, "Embedding size for embedding matrices.")
 tf.flags.DEFINE_integer("memory_size", 250, "Maximum size of memory.")
 tf.flags.DEFINE_integer("task_id", 5, "task id, 1 <= id <= 5")
@@ -49,7 +49,8 @@ tf.flags.DEFINE_boolean('load_vocab', False, 'if True, loads vocabulary instead 
 tf.flags.DEFINE_boolean('alternate', True, 'if True, alternate training between primary and related every epoch, else do it every batch')
 tf.flags.DEFINE_boolean('only_aux', False, 'if True, train anet using only aux, update qnet using full primary task data')
 tf.flags.DEFINE_boolean('only_primary', False, 'if True, train anet using only primary')
-
+tf.flags.DEFINE_boolean('m_series', False, 'if True, m_series is set')
+tf.flags.DEFINE_boolean('only_related', False, 'if True, train qnet using only related tasks')
 
 FLAGS = tf.flags.FLAGS
 print("Started Task:", FLAGS.task_id)
@@ -78,7 +79,9 @@ class chatBot(object):
                  aux_learning_rate=0.001,
                  outer_learning_rate=0.001,
                  only_primary=False,
-                 aux_nonlin=None):
+                 aux_nonlin=None,
+                 m_series=False,
+                 only_related=False):
         """Creates wrapper for training and testing a chatbot model.
 
         Args:
@@ -137,6 +140,10 @@ class chatBot(object):
             only_primary: train on only primary data
 
             aux_nonlin: non linearity at the end of aux pred/targ
+
+            m_series: m_series is set if true
+
+            only_related: If true train qnet with related task data
         """
 
         self.data_dir = data_dir
@@ -167,6 +174,8 @@ class chatBot(object):
         self.outer_learning_rate = outer_learning_rate
         self.only_primary = only_primary
         self.aux_nonlin = aux_nonlin
+        self.m_series = m_series
+        self.only_related = only_related
 
         candidates,self.candid2indx = load_candidates(self.data_dir, self.task_id, True)
         self.n_cand = len(candidates)
@@ -187,14 +196,21 @@ class chatBot(object):
         data = self.trainData + self.testData + self.valData
 
         if self.has_qnet:
-            self.r_trainData, _, _ = r_load_dialog_task(
+            self.r_trainData, self.r_testData, self.r_valData = r_load_dialog_task(
                 self.r_data_dir, self.r_task_id, self.r_candid2indx, self.OOV)
-            data = data + self.r_trainData
-        
-        self.build_vocab(data,candidates,self.save_vocab,self.load_vocab)
+            data = data + self.r_trainData + self.r_valData + self.r_testData
+
+        if self.has_qnet:
+            self.build_vocab(data,candidates,self.save_vocab,self.load_vocab, r_candidates)
         
         self.candidates_vec = vectorize_candidates(
             candidates,self.word_idx,self.candidate_sentence_size)
+
+        if self.has_qnet:
+            self.r_candidates_vec = vectorize_candidates(
+                r_candidates,self.word_idx,self.r_candidate_sentence_size)
+        else:
+            self.r_candidates_vec = None
 
         if FLAGS.sep_test:
             _, self.sep_testData, _ = load_dialog_task(
@@ -222,21 +238,23 @@ class chatBot(object):
                                   self.candidates_vec, self.candidate_sentence_size, session=self.sess,
                                   hops=self.hops, max_grad_norm=self.max_grad_norm,
                                   optimizer=optimizer, outer_optimizer=outer_optimizer, aux_optimizer=aux_optimizer, task_id=task_id,
-                                  inner_lr=self.aux_learning_rate, aux_opt_name=self.aux_opt, alpha=self.alpha, epsilon=self.epsilon, aux_nonlin=self.aux_nonlin)
+                                  inner_lr=self.aux_learning_rate, aux_opt_name=self.aux_opt, alpha=self.alpha,
+                                  epsilon=self.epsilon, aux_nonlin=self.aux_nonlin, m_series=self.m_series,
+                                  r_candidates_vec=self.r_candidates_vec)
 
         self.saver = tf.train.Saver(max_to_keep=50)
         
         self.summary_writer = tf.summary.FileWriter(
             self.result_dir, self.model.graph_output.graph)
         
-    def build_vocab(self,data,candidates,save=False,load=False):
+    def build_vocab(self,data,candidates,save=False,load=False, r_candidates=None):
         """Build vocabulary of words from all dialog data and candidates."""
         if load:
             # Load from vocabulary file
             vocab_file = open('vocab.obj', 'rb')
             vocab = pickle.load(vocab_file)
         else:
-            if self.has_qnet:
+            if self.has_qnet and not self.m_series:
                 vocab = reduce(lambda x, y: x | y,
                                (set(list(chain.from_iterable(s)) + q + q_a)
                                  for s, q, a, q_a in data))
@@ -247,6 +265,11 @@ class chatBot(object):
 
             vocab |= reduce(lambda x,y: x|y, 
                             (set(candidate) for candidate in candidates) )
+
+            if self.has_qnet and self.m_series:
+                vocab |= reduce(lambda x, y: x | y,
+                                (set(r_candidate) for r_candidate in r_candidates))
+
             vocab = sorted(vocab)
         
         self.word_idx = dict((c, i + 1) for i, c in enumerate(vocab))
@@ -254,11 +277,13 @@ class chatBot(object):
         mean_story_size = int(np.mean([ len(s) for s, _, _, _ in data ]))
         self.sentence_size = max(map(len, chain.from_iterable(s for s, _, _, _ in data)))
         self.candidate_sentence_size=max(map(len,candidates))
+        if self.has_qnet:
+            self.r_candidate_sentence_size=max(map(len,r_candidates))
         query_size = max(map(len, (q for _, q, _, _ in data)))
         q_answer_size = max(map(len, (q_a for _, _, _, q_a in data)))
         self.memory_size = min(self.memory_size, max_story_size)
         self.vocab_size = len(self.word_idx) + 1  # +1 for nil word
-        if self.has_qnet:
+        if self.has_qnet and not self.m_series:
             self.sentence_size = max(query_size, self.sentence_size, q_answer_size)  # for the position
         else:
             self.sentence_size = max(query_size, self.sentence_size)  # for the position
@@ -267,6 +292,8 @@ class chatBot(object):
         print("vocab size:", self.vocab_size)
         print("Longest sentence length", self.sentence_size)
         print("Longest candidate sentence length", self.candidate_sentence_size)
+        if self.has_qnet and self.m_series:
+            print("Longest r_candidate sentence length", self.r_candidate_sentence_size)
         print("Longest story length", max_story_size)
         print("Average story length", mean_story_size)
 
@@ -294,7 +321,7 @@ class chatBot(object):
             self.batch_size, self.n_cand, self.memory_size)
         if self.has_qnet:
             r_trainS, r_trainQ, r_trainA, r_trainqA = vectorize_data(
-                self.r_trainData, self.word_idx, self.sentence_size, self.candidate_sentence_size,
+                self.r_trainData, self.word_idx, self.sentence_size, self.r_candidate_sentence_size,
                 self.batch_size, self.r_n_cand, self.memory_size)
             n_r_train = len(r_trainS)
             print("Related Task Trainign Size", n_r_train)
@@ -302,6 +329,13 @@ class chatBot(object):
         valS, valQ, valA, _ = vectorize_data(
             self.valData, self.word_idx, self.sentence_size, self.candidate_sentence_size,
             self.batch_size, self.n_cand, self.memory_size)
+
+        if self.has_qnet and self.m_series:
+            r_valS, r_valQ, r_valA, _ = vectorize_data(
+                self.r_valData, self.word_idx, self.sentence_size, self.r_candidate_sentence_size,
+                self.batch_size, self.r_n_cand, self.memory_size)
+            n_r_val = len(r_valS)
+
         n_train = len(trainS)
         n_val = len(valS)
         print("Training Size", n_train)
@@ -355,6 +389,14 @@ class chatBot(object):
                         a = trainA[start:end]
                         # q_a = trainqA[start:end]
                         cost_t = self.model.batch_fit(s, q, a)
+                        total_cost += cost_t
+                elif self.only_related:
+                    for start, end in r_batches_r:
+                        s = r_trainS[start:end]
+                        q = r_trainQ[start:end]
+                        a = r_trainA[start:end]
+                        # q_a = trainqA[start:end]
+                        cost_t = self.model.q_batch_fit_r(s, q, a)
                         total_cost += cost_t
                 else:
                     if self.alternate:
@@ -420,14 +462,22 @@ class chatBot(object):
                     total_cost += cost_t
             if t % self.evaluation_interval == 0:
                 # Perform validation
-                if self.has_qnet and not self.only_aux and not self.only_primary:
-                    train_preds = self.batch_predict(trainS[:int(n_train/2)],trainQ[:int(n_train/2)],int(n_train/2))
+                if self.has_qnet and self.only_related:
+                    train_preds = self.batch_predict(r_trainS,r_trainQ,n_r_train, 'qnet')
+                    train_acc = metrics.accuracy_score(np.array(train_preds), r_trainA)
+                elif self.has_qnet and not self.only_aux and not self.only_primary:
+                    train_preds = self.batch_predict(trainS[:int(n_train/2)],trainQ[:int(n_train/2)],int(n_train/2), 'anet')
                     train_acc = metrics.accuracy_score(np.array(train_preds), trainA[:int(n_train/2)])
                 else:
-                    train_preds = self.batch_predict(trainS,trainQ,n_train)
+                    train_preds = self.batch_predict(trainS,trainQ,n_train, 'anet')
                     train_acc = metrics.accuracy_score(np.array(train_preds), trainA)
-                val_preds = self.batch_predict(valS,valQ,n_val)
-                val_acc = metrics.accuracy_score(val_preds, valA)
+
+                if self.has_qnet and self.only_related:
+                    val_preds = self.batch_predict(r_valS, r_valQ, n_r_val, 'qnet')
+                    val_acc = metrics.accuracy_score(val_preds, r_valA)
+                else:
+                    val_preds = self.batch_predict(valS,valQ,n_val, 'anet')
+                    val_acc = metrics.accuracy_score(val_preds, valA)
                 print('-----------------------')
                 print('Epoch', t)
                 print('Total Cost:', total_cost)
@@ -478,16 +528,26 @@ class chatBot(object):
         n_test = len(testS)
         print("Testing Size", n_test)
         
-        test_preds = self.batch_predict(testS, testQ, n_test)
+        test_preds = self.batch_predict(testS, testQ, n_test, 'anet')
         test_acc = metrics.accuracy_score(test_preds, testA)
-        print("Testing Accuracy:", test_acc)
-        
+        print("Anet Testing Accuracy on primary task:", test_acc)
+
+        if self.has_qnet and self.only_related:
+            r_testS, r_testQ, r_testA, _ = vectorize_data(
+                self.r_testData, self.word_idx, self.sentence_size, self.r_candidate_sentence_size,
+                self.batch_size, self.n_r_cand, self.memory_size)
+            n_r_test = len(r_testS)
+
+            test_preds = self.batch_predict(r_testS, r_testQ, n_r_test, 'qnet')
+            test_acc = metrics.accuracy_score(test_preds, r_testA)
+            print("Qnet Testing Accuracy on related tasks:", test_acc)
+
         # # Un-comment below to view correct responses and predictions 
         # print(testA)
         # for pred in test_preds:
         #    print(pred, self.indx2candid[pred])
 
-    def batch_predict(self,S,Q,n):
+    def batch_predict(self,S,Q,n, type=None):
         """Predict answers over the passed data in batches.
 
         Args:
@@ -498,12 +558,16 @@ class chatBot(object):
         Returns:
             preds: Tensor (None, vocab_size)
         """
+        if type == 'qnet':
+            predict_qnet = True
+        else:
+            predict_qnet = False
         preds = []
         for start in range(0, n, self.batch_size):
             end = start + self.batch_size
             s = S[start:end]
             q = Q[start:end]
-            pred = self.model.predict(s, q)
+            pred = self.model.predict(s, q, predict_qnet)
             preds += list(pred)
         return preds
 
@@ -526,7 +590,8 @@ if __name__ == '__main__':
                       embedding_size=FLAGS.embedding_size, evaluation_interval=FLAGS.evaluation_interval,
                       alternate=FLAGS.alternate, only_aux=FLAGS.only_aux, aux_opt=FLAGS.aux_opt,
                       aux_learning_rate=FLAGS.aux_learning_rate, outer_learning_rate=FLAGS.outer_learning_rate,
-                      epsilon=FLAGS.epsilon, only_primary=FLAGS.only_primary, max_grad_norm=FLAGS.max_grad_norm, aux_nonlin=FLAGS.aux_nonlin)
+                      epsilon=FLAGS.epsilon, only_primary=FLAGS.only_primary, max_grad_norm=FLAGS.max_grad_norm,
+                      aux_nonlin=FLAGS.aux_nonlin, m_series=FLAGS.m_series, only_related=FLAGS.only_related)
 
     if FLAGS.train:
         chatbot.train()
