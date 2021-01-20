@@ -535,7 +535,7 @@ class chatBot(object):
         if self.has_qnet and self.only_related:
             r_testS, r_testQ, r_testA, _ = vectorize_data(
                 self.r_testData, self.word_idx, self.sentence_size, self.r_candidate_sentence_size,
-                self.batch_size, self.n_r_cand, self.memory_size)
+                self.batch_size, self.r_n_cand, self.memory_size)
             n_r_test = len(r_testS)
 
             test_preds = self.batch_predict(r_testS, r_testQ, n_r_test, 'qnet')
