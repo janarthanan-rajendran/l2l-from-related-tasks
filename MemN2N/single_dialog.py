@@ -52,6 +52,8 @@ tf.flags.DEFINE_boolean('only_primary', False, 'if True, train anet using only p
 tf.flags.DEFINE_boolean('m_series', False, 'if True, m_series is set')
 tf.flags.DEFINE_boolean('only_related', False, 'if True, train qnet using only related tasks')
 tf.flags.DEFINE_boolean('copy_qnet2anet', False, 'if True copy qnet to anet before starting training')
+tf.flags.DEFINE_boolean('transform_qnet', False, 'if True train qnet_aux with primary data to match anet u_k')
+tf.flags.DEFINE_boolean('transform_anet', False, 'if True train anet(u_k) with related data to match qnet_aux')
 
 
 FLAGS = tf.flags.FLAGS
@@ -83,7 +85,9 @@ class chatBot(object):
                  only_primary=False,
                  aux_nonlin=None,
                  m_series=False,
-                 only_related=False):
+                 only_related=False,
+                 transform_qnet=False,
+                 transform_anet=False):
         """Creates wrapper for training and testing a chatbot model.
 
         Args:
@@ -178,6 +182,8 @@ class chatBot(object):
         self.aux_nonlin = aux_nonlin
         self.m_series = m_series
         self.only_related = only_related
+        self.transform_qnet = transform_qnet
+        self.transform_anet = transform_anet
 
         candidates,self.candid2indx = load_candidates(self.data_dir, self.task_id, True)
         self.n_cand = len(candidates)
@@ -347,6 +353,7 @@ class chatBot(object):
                       range(self.batch_size, n_train, self.batch_size))
         batches = [(start, end) for start, end in batches]
         best_validation_accuracy=0
+        best_validation_loss = np.inf
 
         if self.has_qnet:
             np.random.shuffle(batches)
@@ -404,6 +411,22 @@ class chatBot(object):
                         a = r_trainA[start:end]
                         # q_a = trainqA[start:end]
                         cost_t = self.model.q_batch_fit_r(s, q, a)
+                        total_cost += cost_t
+                elif self.transform_qnet:
+                    for start, end in batches:
+                        s = trainS[start:end]
+                        q = trainQ[start:end]
+                        a = trainA[start:end]
+                        # q_a = trainqA[start:end]
+                        cost_t = self.model.batch_fit_qt(s, q, a)
+                        total_cost += cost_t
+                elif self.transform_anet:
+                    for start, end in r_batches_r:
+                        s = r_trainS[start:end]
+                        q = r_trainQ[start:end]
+                        a = r_trainA[start:end]
+                        # q_a = trainqA[start:end]
+                        cost_t = self.model.batch_fit_at(s, q, a)
                         total_cost += cost_t
                 else:
                     if self.alternate:
@@ -469,7 +492,13 @@ class chatBot(object):
                     total_cost += cost_t
             if t % self.evaluation_interval == 0:
                 # Perform validation
-                if self.has_qnet and self.only_related:
+                if self.has_qnet and self.transform_qnet:
+                    train_loss = self.batch_predict_qt(trainS, trainQ, n_train)
+                    train_acc = train_loss
+                elif self.has_qnet and self.transform_anet:
+                    train_loss = self.batch_predict_at(r_trainS, r_trainQ, n_r_train)
+                    train_acc = train_loss
+                elif self.has_qnet and self.only_related:
                     train_preds = self.batch_predict(r_trainS,r_trainQ,n_r_train, 'qnet')
                     train_acc = metrics.accuracy_score(np.array(train_preds), r_trainA)
                 elif self.has_qnet and not self.only_aux and not self.only_primary:
@@ -479,7 +508,13 @@ class chatBot(object):
                     train_preds = self.batch_predict(trainS,trainQ,n_train, 'anet')
                     train_acc = metrics.accuracy_score(np.array(train_preds), trainA)
 
-                if self.has_qnet and self.only_related:
+                if self.has_qnet and self.transform_qnet:
+                    val_loss = self.batch_predict_qt(valS, valQ, n_val)
+                    val_acc = val_loss
+                elif self.has_qnet and self.transform_anet:
+                    val_loss = self.batch_predict_at(r_valS, r_valQ, n_r_val)
+                    val_acc = val_loss
+                elif self.has_qnet and self.only_related:
                     val_preds = self.batch_predict(r_valS, r_valQ, n_r_val, 'qnet')
                     val_acc = metrics.accuracy_score(val_preds, r_valA)
                 else:
@@ -503,12 +538,19 @@ class chatBot(object):
                 summary_str = self.sess.run(merged_summary)
                 self.summary_writer.add_summary(summary_str, t)
                 self.summary_writer.flush()
-                
-                if val_acc > best_validation_accuracy:
-                    best_validation_accuracy=val_acc
-                    self.saver.save(self.sess,self.model_dir+'model.ckpt',
-                                    global_step=t)
-                    print("new model stored")
+
+                if self.transform_qnet or self.transform_anet:
+                    if val_loss < best_validation_loss:
+                        best_validation_loss = val_loss
+                        self.saver.save(self.sess, self.model_dir + 'model.ckpt',
+                                        global_step=t)
+                        print("new model stored")
+                else:
+                    if val_acc > best_validation_accuracy:
+                        best_validation_accuracy=val_acc
+                        self.saver.save(self.sess,self.model_dir+'model.ckpt',
+                                        global_step=t)
+                        print("new model stored")
         time_taken = time.process_time() - start_time
         print("Time taken", time_taken)
 
@@ -579,6 +621,46 @@ class chatBot(object):
             preds += list(pred)
         return preds
 
+    def batch_predict_qt(self,S,Q,n):
+        """Predict answers over the passed data in batches.
+
+        Args:
+            S: Tensor (None, memory_size, sentence_size)
+            Q: Tensor (None, sentence_size)
+            n: int
+
+        Returns:
+            preds: Tensor (None, vocab_size)
+        """
+        total_loss = 0
+        for start in range(0, n, self.batch_size):
+            end = start + self.batch_size
+            s = S[start:end]
+            q = Q[start:end]
+            loss = self.model.predict_qt(s, q)
+            total_loss += loss
+        return total_loss
+
+    def batch_predict_at(self,S,Q,n):
+        """Predict answers over the passed data in batches.
+
+        Args:
+            S: Tensor (None, memory_size, sentence_size)
+            Q: Tensor (None, sentence_size)
+            n: int
+
+        Returns:
+            preds: Tensor (None, vocab_size)
+        """
+        total_loss = 0
+        for start in range(0, n, self.batch_size):
+            end = start + self.batch_size
+            s = S[start:end]
+            q = Q[start:end]
+            loss = self.model.predict_at(s, q)
+            total_loss += loss
+        return total_loss
+
     def close_session(self):
         self.sess.close()
 
@@ -599,7 +681,8 @@ if __name__ == '__main__':
                       alternate=FLAGS.alternate, only_aux=FLAGS.only_aux, aux_opt=FLAGS.aux_opt,
                       aux_learning_rate=FLAGS.aux_learning_rate, outer_learning_rate=FLAGS.outer_learning_rate,
                       epsilon=FLAGS.epsilon, only_primary=FLAGS.only_primary, max_grad_norm=FLAGS.max_grad_norm,
-                      aux_nonlin=FLAGS.aux_nonlin, m_series=FLAGS.m_series, only_related=FLAGS.only_related)
+                      aux_nonlin=FLAGS.aux_nonlin, m_series=FLAGS.m_series, only_related=FLAGS.only_related,
+                      transform_qnet=FLAGS.transform_qnet, transform_anet=FLAGS.transform_anet)
 
     if FLAGS.train:
         chatbot.train()

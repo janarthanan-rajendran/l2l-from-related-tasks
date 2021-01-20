@@ -111,6 +111,8 @@ class MemN2NDialog(object):
         self._m_series = m_series
         self._r_candidates=r_candidates_vec
         self._q_opt = tf.train.AdamOptimizer(learning_rate=1e-3, name='q_opt')
+        self._qt_opt = tf.train.AdamOptimizer(learning_rate=1e-3, name='qt_opt')
+        self._at_opt = tf.train.AdamOptimizer(learning_rate=1e-3, name='at_opt')
 
         # if self._has_qnet:
         #     self._shared_context_w = True
@@ -130,7 +132,7 @@ class MemN2NDialog(object):
         # Calculate cross entropy
         # dimensions: (batch_size, candidates_size)
         if self._has_qnet:
-            logits, u_k_aux = self._inference(weights, self._stories, self._queries)
+            logits, u_k_aux = self._inference(weights, self._stories, self._queries) #for m_series u_k_aux is same as u_k
             if self._m_series:
                 q_logits, ans_targ = self._q_inference(weights, self._stories, self._queries)
             else:
@@ -145,6 +147,10 @@ class MemN2NDialog(object):
             q_cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
                 logits=q_logits, labels=self._answers, name="q_cross_entropy")
             q_cross_entropy_sum = tf.reduce_sum(q_cross_entropy, name="q_cross_entropy_sum")
+
+            qt_mse_loss = tf.losses.mean_squared_error(labels=u_k_aux, predictions=ans_targ)
+            at_mse_loss = tf.losses.mean_squared_error(labels=ans_targ, predictions=u_k_aux)
+
         else:
             logits, _ = self._inference(weights, self._stories, self._queries)
             cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
@@ -156,6 +162,8 @@ class MemN2NDialog(object):
             inner_loss_op = aux_mse
             loss_op = cross_entropy_sum
             q_loss_op = q_cross_entropy_sum
+            qt_loss_op = qt_mse_loss
+            at_loss_op = at_mse_loss
         else:
             loss_op = cross_entropy_sum
 
@@ -252,6 +260,30 @@ class MemN2NDialog(object):
                     q_nil_grads_and_vars.append((g, v))
             q_train_op = self._q_opt.apply_gradients(q_nil_grads_and_vars, name="q_train_op")
 
+            # update qnet_aux
+            qt_grads = tf.gradients(qt_loss_op, list(weights_qnet_aux.values()))
+            qt_grads_and_vars = zip(qt_grads, list(weights_qnet_aux.values()))
+            qt_grads_and_vars = [(tf.clip_by_norm(g, self._max_grad_norm), v) for g, v in qt_grads_and_vars]
+            qt_nil_grads_and_vars = []
+            for g, v in qt_grads_and_vars:
+                if v.name in self._q_nil_vars:
+                    qt_nil_grads_and_vars.append((zero_nil_slot(g), v))
+                else:
+                    qt_nil_grads_and_vars.append((g, v))
+            qt_train_op = self._qt_opt.apply_gradients(qt_nil_grads_and_vars, name="qt_train_op")
+
+            # update anet with qnet_aux
+            at_grads = tf.gradients(at_loss_op, list(weights_anet.values()))
+            at_grads_and_vars = zip(at_grads, list(weights_anet.values()))
+            at_grads_and_vars = [(tf.clip_by_norm(g, self._max_grad_norm), v) for g, v in at_grads_and_vars]
+            at_nil_grads_and_vars = []
+            for g, v in at_grads_and_vars:
+                if v.name in self._nil_vars:
+                    at_nil_grads_and_vars.append((zero_nil_slot(g), v))
+                else:
+                    at_nil_grads_and_vars.append((g, v))
+            at_train_op = self._at_opt.apply_gradients(at_nil_grads_and_vars, name="at_train_op")
+
             if self._m_series:
                 assign_a = weights_anet['A'].assign(weights_qnet['q_A'])
                 assign_h = weights_anet['H'].assign(weights_qnet['q_H'])
@@ -298,6 +330,12 @@ class MemN2NDialog(object):
 
             q_predict_op = tf.argmax(q_logits, 1, name="q_predict_op")
             self.q_predict_op = q_predict_op
+
+            self.qt_loss_op = qt_loss_op
+            self.qt_train_op = qt_train_op
+
+            self.at_loss_op = at_loss_op
+            self.at_train_op = at_train_op
 
             self.assign_qnet2anet_op = assign_qnet2anet_op
 
@@ -556,6 +594,71 @@ class MemN2NDialog(object):
         loss, _ = self._sess.run([self.q_loss_op, self.q_train_op], feed_dict=feed_dict)
         return loss
 
+    def batch_fit_qt(self, stories, queries, answers):
+        """Runs the training algorithm over the passed batch
+
+        Args:
+            stories: Tensor (None, memory_size, sentence_size)
+            queries: Tensor (None, sentence_size)
+            answers: Tensor (None, vocab_size)
+
+        Returns:
+            loss: floating-point number, the loss computed for the batch
+        """
+
+        feed_dict = {self._stories: stories, self._queries: queries,
+                     self._answers: answers}
+        loss, _ = self._sess.run([self.qt_loss_op, self.qt_train_op], feed_dict=feed_dict)
+        return loss
+
+    def batch_fit_at(self, stories, queries, answers):
+        """Runs the training algorithm over the passed batch
+
+        Args:
+            stories: Tensor (None, memory_size, sentence_size)
+            queries: Tensor (None, sentence_size)
+            answers: Tensor (None, vocab_size)
+
+        Returns:
+            loss: floating-point number, the loss computed for the batch
+        """
+
+        feed_dict = {self._stories: stories, self._queries: queries,
+                     self._answers: answers}
+        loss, _ = self._sess.run([self.at_loss_op, self.at_train_op], feed_dict=feed_dict)
+        return loss
+
+    def predict_qt(self, stories, queries):
+        """Runs the training algorithm over the passed batch
+
+        Args:
+            stories: Tensor (None, memory_size, sentence_size)
+            queries: Tensor (None, sentence_size)
+            answers: Tensor (None, vocab_size)
+
+        Returns:
+            loss: floating-point number, the loss computed for the batch
+        """
+
+        feed_dict = {self._stories: stories, self._queries: queries}
+        loss = self._sess.run(self.qt_loss_op, feed_dict=feed_dict)
+        return loss
+
+    def predict_at(self, stories, queries):
+        """Runs the training algorithm over the passed batch
+
+        Args:
+            stories: Tensor (None, memory_size, sentence_size)
+            queries: Tensor (None, sentence_size)
+            answers: Tensor (None, vocab_size)
+
+        Returns:
+            loss: floating-point number, the loss computed for the batch
+        """
+
+        feed_dict = {self._stories: stories, self._queries: queries}
+        loss = self._sess.run(self.at_loss_op, feed_dict=feed_dict)
+        return loss
 
     def predict(self, stories, queries, predict_qnet):
         """Predicts answers as one-hot encoding.
