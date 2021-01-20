@@ -251,6 +251,14 @@ class MemN2NDialog(object):
                 else:
                     q_nil_grads_and_vars.append((g, v))
             q_train_op = self._q_opt.apply_gradients(q_nil_grads_and_vars, name="q_train_op")
+
+            if self._m_series:
+                assign_a = weights_anet['A'].assign(weights_qnet['q_A'])
+                assign_h = weights_anet['H'].assign(weights_qnet['q_H'])
+                assign_w = weights_anet_pred['W'].assign(weights_qnet['q_W'])
+                assign_qnet2anet_op = [assign_a, assign_h, assign_w]
+            else:
+                assign_qnet2anet_op = None
         else:
             # Gradient pipeline
             grads_and_vars = self._opt.compute_gradients(loss_op,
@@ -290,6 +298,8 @@ class MemN2NDialog(object):
 
             q_predict_op = tf.argmax(q_logits, 1, name="q_predict_op")
             self.q_predict_op = q_predict_op
+
+            self.assign_qnet2anet_op = assign_qnet2anet_op
 
         init_op = tf.global_variables_initializer()
         self._sess = session
@@ -562,6 +572,9 @@ class MemN2NDialog(object):
             return self._sess.run(self.q_predict_op, feed_dict=feed_dict)
         else:
             return self._sess.run(self.predict_op, feed_dict=feed_dict)
+
+    def copy_qnet2anet(self):
+        self._sess.run(self.assign_qnet2anet_op)
 
 
 def zero_nil_slot(t, name=None):

@@ -51,6 +51,8 @@ tf.flags.DEFINE_boolean('only_aux', False, 'if True, train anet using only aux, 
 tf.flags.DEFINE_boolean('only_primary', False, 'if True, train anet using only primary')
 tf.flags.DEFINE_boolean('m_series', False, 'if True, m_series is set')
 tf.flags.DEFINE_boolean('only_related', False, 'if True, train qnet using only related tasks')
+tf.flags.DEFINE_boolean('copy_qnet2anet', False, 'if True copy qnet to anet before starting training')
+
 
 FLAGS = tf.flags.FLAGS
 print("Started Task:", FLAGS.task_id)
@@ -356,6 +358,11 @@ class chatBot(object):
 
         # Training loop
         start_time = time.process_time()
+
+        if FLAGS.copy_qnet2anet:
+            self.model.copy_qnet2anet()
+            print("Qnet copied to anet")
+
         for t in range(1, self.epochs+1):
             print('Epoch', t)
             np.random.shuffle(batches)
@@ -501,6 +508,7 @@ class chatBot(object):
                     best_validation_accuracy=val_acc
                     self.saver.save(self.sess,self.model_dir+'model.ckpt',
                                     global_step=t)
+                    print("new model stored")
         time_taken = time.process_time() - start_time
         print("Time taken", time_taken)
 
