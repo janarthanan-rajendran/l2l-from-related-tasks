@@ -54,6 +54,7 @@ tf.flags.DEFINE_boolean('only_related', False, 'if True, train qnet using only r
 tf.flags.DEFINE_boolean('copy_qnet2anet', False, 'if True copy qnet to anet before starting training')
 tf.flags.DEFINE_boolean('transform_qnet', False, 'if True train qnet_aux with primary data to match anet u_k')
 tf.flags.DEFINE_boolean('transform_anet', False, 'if True train anet(u_k) with related data to match qnet_aux')
+tf.flags.DEFINE_boolean('primary_and_related', False, 'if True train anet(u_k) with related data  and primary data')
 
 
 FLAGS = tf.flags.FLAGS
@@ -87,7 +88,8 @@ class chatBot(object):
                  m_series=False,
                  only_related=False,
                  transform_qnet=False,
-                 transform_anet=False):
+                 transform_anet=False,
+                 primary_and_related=False):
         """Creates wrapper for training and testing a chatbot model.
 
         Args:
@@ -184,6 +186,7 @@ class chatBot(object):
         self.only_related = only_related
         self.transform_qnet = transform_qnet
         self.transform_anet = transform_anet
+        self.primary_and_related = primary_and_related
 
         candidates,self.candid2indx = load_candidates(self.data_dir, self.task_id, True)
         self.n_cand = len(candidates)
@@ -428,6 +431,22 @@ class chatBot(object):
                         # q_a = trainqA[start:end]
                         cost_t = self.model.batch_fit_at(s, q, a)
                         total_cost += cost_t
+                elif self.primary_and_related:
+                    for start, end in r_batches_r:
+                        s = r_trainS[start:end]
+                        q = r_trainQ[start:end]
+                        a = r_trainA[start:end]
+                        # q_a = trainqA[start:end]
+                        cost_t_related = self.model.batch_fit(s, q, a, primary=False)
+
+                        start, end = random.sample(batches, 1)[0]
+                        s = trainS[start:end]
+                        q = trainQ[start:end]
+                        a = trainA[start:end]
+                        # q_a = trainqA[start:end]
+                        cost_t_primary = self.model.batch_fit(s, q, a)
+
+                        total_cost += cost_t_related + cost_t_primary
                 else:
                     if self.alternate:
                         if t % 2 == 0:
@@ -682,7 +701,8 @@ if __name__ == '__main__':
                       aux_learning_rate=FLAGS.aux_learning_rate, outer_learning_rate=FLAGS.outer_learning_rate,
                       epsilon=FLAGS.epsilon, only_primary=FLAGS.only_primary, max_grad_norm=FLAGS.max_grad_norm,
                       aux_nonlin=FLAGS.aux_nonlin, m_series=FLAGS.m_series, only_related=FLAGS.only_related,
-                      transform_qnet=FLAGS.transform_qnet, transform_anet=FLAGS.transform_anet)
+                      transform_qnet=FLAGS.transform_qnet, transform_anet=FLAGS.transform_anet,
+                      primary_and_related=FLAGS.primary_and_related)
 
     if FLAGS.train:
         chatbot.train()

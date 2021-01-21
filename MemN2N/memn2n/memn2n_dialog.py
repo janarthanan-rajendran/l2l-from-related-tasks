@@ -113,6 +113,8 @@ class MemN2NDialog(object):
         self._q_opt = tf.train.AdamOptimizer(learning_rate=1e-3, name='q_opt')
         self._qt_opt = tf.train.AdamOptimizer(learning_rate=1e-3, name='qt_opt')
         self._at_opt = tf.train.AdamOptimizer(learning_rate=1e-3, name='at_opt')
+        self._r_opt = tf.train.AdamOptimizer(learning_rate=1e-3, name='r_opt')
+
 
         # if self._has_qnet:
         #     self._shared_context_w = True
@@ -132,7 +134,7 @@ class MemN2NDialog(object):
         # Calculate cross entropy
         # dimensions: (batch_size, candidates_size)
         if self._has_qnet:
-            logits, u_k_aux = self._inference(weights, self._stories, self._queries) #for m_series u_k_aux is same as u_k
+            logits, u_k_aux, r_logits = self._inference(weights, self._stories, self._queries) #for m_series u_k_aux is same as u_k
             if self._m_series:
                 q_logits, ans_targ = self._q_inference(weights, self._stories, self._queries)
             else:
@@ -144,6 +146,10 @@ class MemN2NDialog(object):
                 logits=logits, labels=self._answers, name="cross_entropy")
             cross_entropy_sum = tf.reduce_sum(cross_entropy, name="cross_entropy_sum")
 
+            r_cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
+                logits=r_logits, labels=self._answers, name="r_cross_entropy")
+            r_cross_entropy_sum = tf.reduce_sum(r_cross_entropy, name="r_cross_entropy_sum")
+
             q_cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
                 logits=q_logits, labels=self._answers, name="q_cross_entropy")
             q_cross_entropy_sum = tf.reduce_sum(q_cross_entropy, name="q_cross_entropy_sum")
@@ -152,7 +158,7 @@ class MemN2NDialog(object):
             at_mse_loss = tf.losses.mean_squared_error(labels=ans_targ, predictions=u_k_aux)
 
         else:
-            logits, _ = self._inference(weights, self._stories, self._queries)
+            logits, _, _ = self._inference(weights, self._stories, self._queries)
             cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
                 logits=logits, labels=self._answers, name="cross_entropy")
             cross_entropy_sum = tf.reduce_sum(cross_entropy, name="cross_entropy_sum")
@@ -161,6 +167,7 @@ class MemN2NDialog(object):
         if self._has_qnet:
             inner_loss_op = aux_mse
             loss_op = cross_entropy_sum
+            r_loss_op = r_cross_entropy_sum
             q_loss_op = q_cross_entropy_sum
             qt_loss_op = qt_mse_loss
             at_loss_op = at_mse_loss
@@ -214,7 +221,7 @@ class MemN2NDialog(object):
                                                (list(weights_anet.keys()) + list(weights_anet_aux.keys()) + list(weights_anet_qnet.keys()))):
                     fast_anet_weights[var_name] = var - self._inner_lr * grad
 
-            outer_logits, _ = self._inference({**fast_anet_weights, **weights_anet_pred, **weights_anet_pred_qnet}, self._p_stories, self._p_queries)
+            outer_logits, _, _ = self._inference({**fast_anet_weights, **weights_anet_pred, **weights_anet_pred_qnet}, self._p_stories, self._p_queries)
             outer_cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
                 logits=outer_logits, labels=self._p_answers, name="outer_cross_entropy")
             outer_cross_entropy_sum = tf.reduce_sum(outer_cross_entropy, name="outer_cross_entropy_sum")
@@ -247,6 +254,21 @@ class MemN2NDialog(object):
                 else:
                     nil_grads_and_vars.append((g, v))
             train_op = self._opt.apply_gradients(nil_grads_and_vars, name="train_op")
+
+            # update anet with related task data
+            r_grads = tf.gradients(r_loss_op, list(weights_anet.values()) + list(weights_anet_pred.values()) + list(
+                weights_anet_qnet.values()) + list(weights_anet_pred_qnet.values()))
+            r_grads_and_vars = zip(r_grads, list(weights_anet.values()) + list(weights_anet_pred.values()) + list(
+                weights_anet_qnet.values()) + list(weights_anet_pred_qnet.values()))
+            r_grads_and_vars = [(tf.clip_by_norm(g, self._max_grad_norm), v)
+                              for g, v in r_grads_and_vars]
+            r_nil_grads_and_vars = []
+            for g, v in r_grads_and_vars:
+                if v.name in self._nil_vars:
+                    r_nil_grads_and_vars.append((zero_nil_slot(g), v))
+                else:
+                    r_nil_grads_and_vars.append((g, v))
+            r_train_op = self._r_opt.apply_gradients(r_nil_grads_and_vars, name="r_train_op")
 
             # update qnet with related task data
             q_grads = tf.gradients(q_loss_op, list(weights_qnet.values()))
@@ -338,6 +360,9 @@ class MemN2NDialog(object):
             self.at_train_op = at_train_op
 
             self.assign_qnet2anet_op = assign_qnet2anet_op
+
+            self.r_loss_op = r_loss_op
+            self.r_train_op = r_train_op
 
         init_op = tf.global_variables_initializer()
         self._sess = session
@@ -455,15 +480,18 @@ class MemN2NDialog(object):
             candidates_emb=tf.nn.embedding_lookup(weights['W'], self._candidates)
             candidates_emb_sum=tf.reduce_sum(candidates_emb,1)
 
+            r_candidates_emb=tf.nn.embedding_lookup(weights['W'], self._r_candidates)
+            r_candidates_emb_sum=tf.reduce_sum(r_candidates_emb,1)
+
             if self._has_qnet and not self._m_series:
                 u_k_p = tf.matmul(u_k, weights['H_p'])
                 if self._aux_nonlin == 'arctan':
                     u_k_aux = tf.math.atan(tf.matmul(u_k, weights['H_aux']))
                 else:
                     u_k_aux = tf.math.atan(tf.matmul(u_k, weights['H_aux']))
-                return tf.matmul(u_k_p, tf.transpose(candidates_emb_sum)), u_k_aux
+                return tf.matmul(u_k_p, tf.transpose(candidates_emb_sum)), u_k_aux, tf.matmul(u_k, tf.transpose(r_candidates_emb_sum))
             else:
-                return tf.matmul(u_k, tf.transpose(candidates_emb_sum)), u_k
+                return tf.matmul(u_k, tf.transpose(candidates_emb_sum)), u_k, tf.matmul(u_k, tf.transpose(r_candidates_emb_sum))
 
     def _q_inference(self, weights, stories, queries, q_answers=None):
         if self._has_qnet:
@@ -534,7 +562,7 @@ class MemN2NDialog(object):
 
         return tf.matmul(q_u_k, tf.transpose(q_candidates_emb_sum)), q_answer_targ
 
-    def batch_fit(self, stories, queries, answers):
+    def batch_fit(self, stories, queries, answers, primary=True):
         """Runs the training algorithm over the passed batch
 
         Args:
@@ -548,7 +576,11 @@ class MemN2NDialog(object):
 
         feed_dict = {self._stories: stories, self._queries: queries,
                      self._answers: answers}
-        loss, _ = self._sess.run([self.loss_op, self.train_op], feed_dict=feed_dict)
+
+        if primary:
+            loss, _ = self._sess.run([self.loss_op, self.train_op], feed_dict=feed_dict)
+        else:
+            loss, _ = self._sess.run([self.r_loss_op, self.r_train_op], feed_dict=feed_dict)
         return loss
 
     def q_batch_fit(self, stories, queries, answers, q_answers, p_stories=None, p_queries=None, p_answers=None, primary=True):
