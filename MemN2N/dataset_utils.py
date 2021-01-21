@@ -60,6 +60,32 @@ def vary_data_ratio(in_data_dir, out_data_dir, file_name, train_data_percent, to
                         dialog_count +=1
             print(dialog_count)
 
+def vary_data_ratio_all_tasks(in_data_dir, out_data_dir, file_name, train_data_percent, total_dialogs):
+    for data_percent in train_data_percent:
+        dialog_max_count = data_percent/100 * total_dialogs
+        print(data_percent, dialog_max_count)
+        dialog_count = 0
+        with open(in_data_dir+file_name,'r') as f_in:
+            with open(out_data_dir+'-'+str(data_percent)+'/'+file_name,'w') as f_out:
+                in_lines = f_in.readlines()
+                for line in in_lines:
+                    f_out.write(line)
+                    line = line.strip()
+                    if not line:
+                        dialog_count +=1
+                        if dialog_count == dialog_max_count:
+                            break
+
+            # checking
+            dialog_count = 0
+            with open(out_data_dir+'-'+str(data_percent)+'/'+file_name,'r') as f_out:
+                out_lines = f_out.readlines()
+                for line in out_lines:
+                    line = line.strip()
+                    if not line:
+                        dialog_count +=1
+            print(dialog_count)
+
 def build_mp_sp_data(in_data_dir, out_data_dir, file_name, train_data_percent, shift_nid):
 
     for data_percent in train_data_percent:
@@ -403,9 +429,19 @@ def main(argv):
         #out_data_dir = './../data/personalized-dialog-dataset/split-by-profile-from-full'
         out_data_dir = './../data/personalized-dialog-dataset/split-by-profile'
         file_name = 'personalized-dialog-task5-full-dialogs-trn.txt'
-        train_data_percent = [1, 5]
+        train_data_percent = [1, 5, 10, 25]
         total_dialogs = 1000  # 1000 for split-by-profile and 2000 for split-by-profile-from-full
         vary_data_ratio(in_data_dir, out_data_dir, file_name, train_data_percent, total_dialogs)
+    elif FLAGS.function_name == 'vary_data_ratio_all_tasks':
+        ## for creating datasets with different proportion of training data
+        #in_data_dir = './../data/personalized-dialog-dataset/split-by-profile-from-full/'
+        in_data_dir = './../data/personalized-dialog-dataset/small/'
+        #out_data_dir = './../data/personalized-dialog-dataset/split-by-profile-from-full'
+        out_data_dir = './../data/personalized-dialog-dataset/small'
+        file_name = 'personalized-dialog-task3-options-trn.txt'
+        train_data_percent = [1, 5, 10, 25]
+        total_dialogs = 1000  # 1000 for split-by-profile and 2000 for split-by-profile-from-full
+        vary_data_ratio_all_tasks(in_data_dir, out_data_dir, file_name, train_data_percent, total_dialogs)
     elif FLAGS.function_name == 'build_mp_sp_data':
         ## combining multi-profile and specific profile data
         in_data_dir = './../data/personalized-dialog-dataset/full/'
