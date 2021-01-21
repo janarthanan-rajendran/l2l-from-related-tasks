@@ -438,7 +438,8 @@ def main(argv):
         in_data_dir = './../data/personalized-dialog-dataset/small/'
         #out_data_dir = './../data/personalized-dialog-dataset/split-by-profile-from-full'
         out_data_dir = './../data/personalized-dialog-dataset/small'
-        file_name = 'personalized-dialog-task3-options-trn.txt'
+        # file_name = 'personalized-dialog-task3-options-trn.txt'
+        file_name = 'personalized-dialog-task1-API-calls-trn.txt'
         train_data_percent = [1, 5, 10, 25]
         total_dialogs = 1000  # 1000 for split-by-profile and 2000 for split-by-profile-from-full
         vary_data_ratio_all_tasks(in_data_dir, out_data_dir, file_name, train_data_percent, total_dialogs)
