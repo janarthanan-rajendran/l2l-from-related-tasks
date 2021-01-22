@@ -55,6 +55,7 @@ tf.flags.DEFINE_boolean('copy_qnet2anet', False, 'if True copy qnet to anet befo
 tf.flags.DEFINE_boolean('transform_qnet', False, 'if True train qnet_aux with primary data to match anet u_k')
 tf.flags.DEFINE_boolean('transform_anet', False, 'if True train anet(u_k) with related data to match qnet_aux')
 tf.flags.DEFINE_boolean('primary_and_related', False, 'if True train anet(u_k) with related data  and primary data')
+tf.flags.DEFINE_boolean('gated_qnet', True, 'gated qnet')
 
 
 FLAGS = tf.flags.FLAGS
@@ -89,7 +90,8 @@ class chatBot(object):
                  only_related=False,
                  transform_qnet=False,
                  transform_anet=False,
-                 primary_and_related=False):
+                 primary_and_related=False,
+                 gated_qnet=False):
         """Creates wrapper for training and testing a chatbot model.
 
         Args:
@@ -187,6 +189,7 @@ class chatBot(object):
         self.transform_qnet = transform_qnet
         self.transform_anet = transform_anet
         self.primary_and_related = primary_and_related
+        self.gated_qnet = gated_qnet
 
         candidates,self.candid2indx = load_candidates(self.data_dir, self.task_id, True)
         self.n_cand = len(candidates)
@@ -432,10 +435,10 @@ class chatBot(object):
                         cost_t = self.model.batch_fit_at(s, q, a)
                         total_cost += cost_t
                 elif self.primary_and_related:
-                    for start, end in r_batches_r:
-                        s = r_trainS[start:end]
-                        q = r_trainQ[start:end]
-                        a = r_trainA[start:end]
+                    for r_start, r_end in r_batches_r:
+                        s = r_trainS[r_start:r_end]
+                        q = r_trainQ[r_start:r_end]
+                        a = r_trainA[r_start:r_end]
                         # q_a = trainqA[start:end]
                         cost_t_related = self.model.batch_fit(s, q, a, primary=False)
 
@@ -447,6 +450,32 @@ class chatBot(object):
                         cost_t_primary = self.model.batch_fit(s, q, a)
 
                         total_cost += cost_t_related + cost_t_primary
+                elif self.gated_qnet:
+                    for r_start, r_end in r_batches_r:
+
+                        start, end = random.sample(batches, 1)[0]
+                        r_s_p = trainS[start:end]
+                        r_q_p = trainQ[start:end]
+                        r_a_p = trainA[start:end]
+                        r_q_a_p = trainqA[start:end]
+
+                        r_s = r_trainS[r_start:r_end]
+                        r_q = r_trainQ[r_start:r_end]
+                        r_a = r_trainA[r_start:r_end]
+                        r_q_a = r_trainqA[r_start:r_end]
+
+                        cost_t_outer = self.model.gated_q_batch_fit(r_s, r_q, r_a, r_q_a, r_s_p, r_q_p, r_a_p) #gated qnet update
+
+                        cost_t_aux = self.model.gated_batch_fit(r_s, r_q, r_a) #anet with aux update with related data
+
+                        start, end = random.sample(batches, 1)[0]
+                        s = trainS[start:end]
+                        q = trainQ[start:end]
+                        a = trainA[start:end]
+                        # q_a = trainqA[start:end]
+                        cost_t_primary = self.model.batch_fit(s, q, a) # anet with primary update
+
+                        total_cost += cost_t_outer + cost_t_aux + cost_t_primary
                 else:
                     if self.alternate:
                         if t % 2 == 0:
@@ -702,7 +731,7 @@ if __name__ == '__main__':
                       epsilon=FLAGS.epsilon, only_primary=FLAGS.only_primary, max_grad_norm=FLAGS.max_grad_norm,
                       aux_nonlin=FLAGS.aux_nonlin, m_series=FLAGS.m_series, only_related=FLAGS.only_related,
                       transform_qnet=FLAGS.transform_qnet, transform_anet=FLAGS.transform_anet,
-                      primary_and_related=FLAGS.primary_and_related)
+                      primary_and_related=FLAGS.primary_and_related, gated_qnet=FLAGS.gated_qnet)
 
     if FLAGS.train:
         chatbot.train()

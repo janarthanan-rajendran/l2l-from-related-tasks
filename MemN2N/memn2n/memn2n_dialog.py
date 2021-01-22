@@ -94,6 +94,7 @@ class MemN2NDialog(object):
         self._embedding_size = embedding_size
         self._hops = hops
         self._qnet_hops = 3
+        self._gated_qnet_hops = 1
         self._max_grad_norm = max_grad_norm
         self._nonlin = nonlin
         self._init = initializer
@@ -102,6 +103,7 @@ class MemN2NDialog(object):
         self._aux_opt = aux_optimizer
         self._name = name
         self._q_name = q_name
+        self._gated_q_name = 'gated_qnet'
         self._candidates=candidates_vec
         self._inner_lr = inner_lr
         self._aux_opt_name = aux_opt_name
@@ -114,7 +116,8 @@ class MemN2NDialog(object):
         self._qt_opt = tf.train.AdamOptimizer(learning_rate=1e-3, name='qt_opt')
         self._at_opt = tf.train.AdamOptimizer(learning_rate=1e-3, name='at_opt')
         self._r_opt = tf.train.AdamOptimizer(learning_rate=1e-3, name='r_opt')
-
+        self._r_gated_opt = tf.train.GradientDescentOptimizer(learning_rate=1e-3, name='r_gated_opt') #TODO
+        self._gated_outer_opt = tf.train.AdamOptimizer(learning_rate=1e-3, name='gated_outer_opt')
 
         # if self._has_qnet:
         #     self._shared_context_w = True
@@ -124,8 +127,8 @@ class MemN2NDialog(object):
         self._shared_answer_w = False
 
         self._build_inputs()
-        weights_anet, weights_anet_pred, weights_anet_aux, weights_qnet, weights_anet_qnet, weights_anet_pred_qnet, weights_qnet_aux = self._build_vars()
-        weights = {**weights_anet, **weights_anet_pred, **weights_anet_aux, **weights_qnet, **weights_anet_qnet, **weights_anet_pred_qnet, **weights_qnet_aux}
+        weights_anet, weights_anet_pred, weights_anet_aux, weights_qnet, weights_anet_qnet, weights_anet_pred_qnet, weights_qnet_aux, weights_gated_qnet = self._build_vars()
+        weights = {**weights_anet, **weights_anet_pred, **weights_anet_aux, **weights_qnet, **weights_anet_qnet, **weights_anet_pred_qnet, **weights_qnet_aux, **weights_gated_qnet}
         
         # Define summary directory
         timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
@@ -140,6 +143,8 @@ class MemN2NDialog(object):
             else:
                 q_logits, ans_targ = self._q_inference(weights, self._stories, self._queries, self._q_answers)
 
+            aux_gate = self._gated_q_inference(weights, self._stories, self._queries)
+
             # aux_mse = tf.losses.mean_squared_error(labels=ans_targ, predictions=u_k)
             aux_mse = tf.reduce_mean(tf.reduce_sum(tf.square(ans_targ - u_k_aux),1))
             cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
@@ -149,6 +154,9 @@ class MemN2NDialog(object):
             r_cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
                 logits=r_logits, labels=self._answers, name="r_cross_entropy")
             r_cross_entropy_sum = tf.reduce_sum(r_cross_entropy, name="r_cross_entropy_sum")
+
+            r_gated_cross_entropy = aux_gate * r_cross_entropy
+            r_gated_cross_entropy_sum = tf.reduce_sum(r_gated_cross_entropy, name="r_gated_cross_entropy_sum")
 
             q_cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
                 logits=q_logits, labels=self._answers, name="q_cross_entropy")
@@ -168,6 +176,7 @@ class MemN2NDialog(object):
             inner_loss_op = aux_mse
             loss_op = cross_entropy_sum
             r_loss_op = r_cross_entropy_sum
+            r_gated_loss_op = r_gated_cross_entropy_sum
             q_loss_op = q_cross_entropy_sum
             qt_loss_op = qt_mse_loss
             at_loss_op = at_mse_loss
@@ -270,6 +279,59 @@ class MemN2NDialog(object):
                     r_nil_grads_and_vars.append((g, v))
             r_train_op = self._r_opt.apply_gradients(r_nil_grads_and_vars, name="r_train_op")
 
+            # update anet with gated related task data
+            r_gated_grads = tf.gradients(r_gated_loss_op, list(weights_anet.values()) + list(weights_anet_pred.values()) + list(
+                weights_anet_qnet.values()) + list(weights_anet_pred_qnet.values()))
+            r_gated_grads_and_vars = zip(r_gated_grads, list(weights_anet.values()) + list(weights_anet_pred.values()) + list(
+                weights_anet_qnet.values()) + list(weights_anet_pred_qnet.values()))
+            r_gated_grads_and_vars = [(tf.clip_by_norm(g, self._max_grad_norm), v)
+                              for g, v in r_gated_grads_and_vars]
+            r_gated_nil_grads_and_vars = []
+            for g, v in r_gated_grads_and_vars:
+                if v.name in self._nil_vars:
+                    r_gated_nil_grads_and_vars.append((zero_nil_slot(g), v))
+                else:
+                    r_gated_nil_grads_and_vars.append((g, v))
+            r_gated_train_op = self._r_gated_opt.apply_gradients(r_gated_nil_grads_and_vars, name="r_gated_train_op")
+
+            # simulate the auxiliary update for anet
+            gated_inner_grads = tf.gradients(r_gated_loss_op, list(weights_anet.values()) + list(weights_anet_pred.values())
+                                             + list(weights_anet_qnet.values()) + list(weights_anet_pred_qnet.values()))
+            gated_inner_grads = [tf.clip_by_norm(grad, self._max_grad_norm) for grad in gated_inner_grads]
+            gated_inner_nil_grads = []
+            for g, v in zip(gated_inner_grads, list(weights_anet.values()) + list(weights_anet_pred.values())
+                                               + list(weights_anet_qnet.values()) + list(weights_anet_pred_qnet.values())):
+                if v.name in self._nil_vars:
+                    gated_inner_nil_grads.append(zero_nil_slot(g))
+                else:
+                    gated_inner_nil_grads.append(g)
+
+            gated_fast_anet_weights = {}
+            for grad, var, var_name in zip(gated_inner_nil_grads, (list(weights_anet.values()) + list(weights_anet_pred.values())
+                                                                   + list(weights_anet_qnet.values()) + list(weights_anet_pred_qnet.values())),
+                                           (list(weights_anet.keys()) + list(weights_anet_pred.keys()) + list(weights_anet_qnet.keys())
+                                            + list(weights_anet_pred_qnet.keys()))):
+                gated_fast_anet_weights[var_name] = var - self._inner_lr * grad
+
+
+            gated_outer_logits, _, _ = self._inference(gated_fast_anet_weights, self._p_stories, self._p_queries)
+            gated_outer_cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
+                logits=gated_outer_logits, labels=self._p_answers, name="gated_outer_cross_entropy")
+            gated_outer_cross_entropy_sum = tf.reduce_sum(gated_outer_cross_entropy, name="gated_outer_cross_entropy_sum")
+            gated_outer_loss_op = gated_outer_cross_entropy_sum
+
+            # Update qnet (gated)
+            gated_outer_grads = tf.gradients(gated_outer_loss_op, list(weights_gated_qnet.values()))
+            gated_outer_grads_and_vars = zip(gated_outer_grads,list(weights_gated_qnet.values()))
+            gated_outer_grads_and_vars = [(tf.clip_by_norm(g, self._max_grad_norm), v) for g, v in gated_outer_grads_and_vars]
+            gated_outer_nil_grads_and_vars = []
+            for g, v in gated_outer_grads_and_vars:
+                if v.name in self._gated_q_nil_vars:
+                    gated_outer_nil_grads_and_vars.append((zero_nil_slot(g), v))
+                else:
+                    gated_outer_nil_grads_and_vars.append((g, v))
+            gated_outer_train_op = self._gated_outer_opt.apply_gradients(gated_outer_nil_grads_and_vars, name="gated_outer_train_op")
+
             # update qnet with related task data
             q_grads = tf.gradients(q_loss_op, list(weights_qnet.values()))
             q_grads_and_vars = zip(q_grads, list(weights_qnet.values()))
@@ -364,6 +426,12 @@ class MemN2NDialog(object):
             self.r_loss_op = r_loss_op
             self.r_train_op = r_train_op
 
+            self.r_gated_loss_op = r_gated_loss_op
+            self.r_gated_train_op = r_gated_train_op
+
+            self.gated_outer_loss_op = gated_outer_loss_op
+            self.gated_outer_train_op = gated_outer_train_op
+
         init_op = tf.global_variables_initializer()
         self._sess = session
         self._sess.run(init_op)
@@ -393,6 +461,7 @@ class MemN2NDialog(object):
         weights_anet_qnet = {} # shared between anet and qnet in all updates
         weights_anet_pred_qnet = {} # weights for qnet and anet primary update
         weights_qnet_aux = {}
+        weights_gated_qnet = {}
 
         with tf.variable_scope(self._name):
             nil_word_slot = tf.zeros([1, self._embedding_size])
@@ -432,9 +501,18 @@ class MemN2NDialog(object):
                 else:
                     weights_qnet['ans_W'] = tf.Variable(self._init([self._embedding_size, self._embedding_size]), name="ans_W")
 
+            with tf.variable_scope(self._gated_q_name):
+                gated_q_A = tf.concat(axis=0, values=[nil_word_slot, self._init([self._vocab_size - 1, self._embedding_size])])
+                weights_gated_qnet['gated_q_A'] = tf.Variable(gated_q_A, name="gated_q_A")
+                weights_gated_qnet['gated_q_H'] = tf.Variable(self._init([self._embedding_size, self._embedding_size]), name="gated_q_H")
+                weights_gated_qnet['gated_q_W'] = tf.Variable(self._init([self._embedding_size, 1]), name="gated_q_W")
+
         if not (self._shared_context_w and self._shared_answer_w):  # TODO If only of them is True
             self._q_nil_vars = set([weights_qnet['q_A'].name, weights_qnet['q_W'].name]) #TODO
-        return weights_anet, weights_anet_pred, weights_anet_aux, weights_qnet, weights_anet_qnet, weights_anet_pred_qnet, weights_qnet_aux
+
+        self._gated_q_nil_vars = set([weights_gated_qnet['gated_q_A'].name])  # TODO
+
+        return weights_anet, weights_anet_pred, weights_anet_aux, weights_qnet, weights_anet_qnet, weights_anet_pred_qnet, weights_qnet_aux, weights_gated_qnet
 
 
     def _inference(self, weights, stories, queries):
@@ -562,6 +640,54 @@ class MemN2NDialog(object):
 
         return tf.matmul(q_u_k, tf.transpose(q_candidates_emb_sum)), q_answer_targ
 
+    def _gated_q_inference(self, weights, stories, queries, q_answers=None):
+        if self._has_qnet:
+            #Forward pass through the model Question network
+            with tf.variable_scope(self._gated_q_name):
+                q_q_emb = tf.nn.embedding_lookup(weights['gated_q_A'], queries)  # Queries vectorr
+
+                # Initial state of memory controller for conversation history
+                q_q_0 = tf.reduce_sum(q_q_emb, 1)
+                q_u = [q_q_0]
+
+                # Iterate over memory for number of hops
+                for count in range(self._gated_qnet_hops):
+
+                    q_m_emb = tf.nn.embedding_lookup(weights['gated_q_A'], stories)  # Stories vector
+
+                    q_m = tf.reduce_sum(q_m_emb, 2)  # Conversation history memory
+
+                    # Hack to get around no reduce_dot
+                    q_u_temp = tf.transpose(tf.expand_dims(q_u[-1], -1), [0, 2, 1])
+                    q_dotted = tf.reduce_sum(q_m * q_u_temp, 2)
+
+                    # Calculate probabilities
+                    q_probs = tf.nn.softmax(q_dotted)
+
+                    # # Uncomment below to view attention values over memories during inference:
+                    # probs = tf.Print(
+                    #     probs, ['memory', count, tf.shape(probs), probs], summarize=200)
+
+                    q_probs_temp = tf.transpose(tf.expand_dims(q_probs, -1), [0, 2, 1])
+                    q_c_temp = tf.transpose(q_m, [0, 2, 1])
+
+                    # Compute returned vector
+                    q_o_k = tf.reduce_sum(q_c_temp * q_probs_temp, 2)
+
+                    # Update controller state
+                    q_u_k = tf.matmul(q_u[-1], weights['gated_q_H']) + q_o_k
+
+                    # Apply nonlinearity
+                    if self._nonlin:
+                        q_u_k = self._nonlin(q_u_k)
+
+                    q_u.append(q_u_k)
+
+                gate_weight = tf.nn.sigmoid(tf.matmul(q_u_k, weights['gated_q_W']))
+
+        return gate_weight
+
+
     def batch_fit(self, stories, queries, answers, primary=True):
         """Runs the training algorithm over the passed batch
 
@@ -581,6 +707,23 @@ class MemN2NDialog(object):
             loss, _ = self._sess.run([self.loss_op, self.train_op], feed_dict=feed_dict)
         else:
             loss, _ = self._sess.run([self.r_loss_op, self.r_train_op], feed_dict=feed_dict)
+        return loss
+
+    def gated_batch_fit(self, stories, queries, answers):
+        """Runs the training algorithm over the passed batch
+
+        Args:
+            stories: Tensor (None, memory_size, sentence_size)
+            queries: Tensor (None, sentence_size)
+            answers: Tensor (None, vocab_size)
+
+        Returns:
+            loss: floating-point number, the loss computed for the batch
+        """
+
+        feed_dict = {self._stories: stories, self._queries: queries, self._answers: answers}
+
+        loss, _ = self._sess.run([self.r_gated_loss_op, self.r_gated_train_op], feed_dict=feed_dict)
         return loss
 
     def q_batch_fit(self, stories, queries, answers, q_answers, p_stories=None, p_queries=None, p_answers=None, primary=True):
@@ -608,6 +751,25 @@ class MemN2NDialog(object):
                                                              self.outer_loss_op, self.outer_train_op], feed_dict=feed_dict)
             return outer_loss, inner_loss
 
+    def gated_q_batch_fit(self, stories, queries, answers, q_answers, p_stories=None, p_queries=None, p_answers=None):
+        """Runs the training algorithm over the passed batch
+
+        Args:
+            stories: Tensor (None, memory_size, sentence_size)
+            queries: Tensor (None, sentence_size)
+            answers: Tensor (None, vocab_size)
+            q_answers: Tensor (None, sentence_size)
+            p_*: Primary tasks stories, queries and answers
+
+        Returns:
+            loss: floating-point number, the loss computed for the batch
+        """
+
+        feed_dict = {self._stories: stories, self._queries: queries, self._answers: answers, self._q_answers: q_answers,
+                     self._p_stories: p_stories, self._p_queries: p_queries, self._p_answers: p_answers}
+        outer_loss, _ = self._sess.run([self.gated_outer_loss_op, self.gated_outer_train_op], feed_dict=feed_dict)
+
+        return outer_loss
 
     def q_batch_fit_r(self, stories, queries, answers):
         """Runs the training algorithm over the passed batch
