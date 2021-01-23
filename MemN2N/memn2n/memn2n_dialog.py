@@ -134,8 +134,6 @@ class MemN2NDialog(object):
         timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
         self.root_dir = "%s_%s_%s_%s/" % ('task', str(task_id),'summary_output', timestamp)
 
-        tf.debugging.enable_check_numerics()
-
         # Calculate cross entropy
         # dimensions: (batch_size, candidates_size)
         if self._has_qnet:
@@ -284,7 +282,7 @@ class MemN2NDialog(object):
             # update anet with gated related task data
             r_gated_grads = tf.gradients(r_gated_loss_op, list(weights_anet.values()) + list(weights_anet_pred.values()) + list(
                 weights_anet_qnet.values()) + list(weights_anet_pred_qnet.values()))
-            r_gated_grads, _ = tf.clip_by_global_norm(r_gated_grads, self._max_grad_norm) 
+            r_gated_grads, _ = tf.clip_by_global_norm(r_gated_grads, self._max_grad_norm)
             r_gated_grads_and_vars = zip(r_gated_grads, list(weights_anet.values()) + list(weights_anet_pred.values()) + list(
                 weights_anet_qnet.values()) + list(weights_anet_pred_qnet.values()))
             # r_gated_grads_and_vars = [(tf.clip_by_norm(g, self._max_grad_norm), v)
