@@ -118,7 +118,7 @@ class MemN2NDialog(object):
         self._at_opt = tf.train.AdamOptimizer(learning_rate=1e-3, name='at_opt')
         self._r_opt = tf.train.AdamOptimizer(learning_rate=1e-3, name='r_opt')
         self._r_gated_opt = tf.train.AdamOptimizer(learning_rate=1e-3, name='r_gated_opt')
-        self._gated_outer_opt = tf.train.AdamOptimizer(learning_rate=1e-4, name='gated_outer_opt')
+        self._gated_outer_opt = tf.train.AdamOptimizer(learning_rate=1e-4, name='gated_outer_opt') #TODO
 
         # if self._has_qnet:
         #     self._shared_context_w = True
@@ -444,6 +444,8 @@ class MemN2NDialog(object):
 
         init_op = tf.global_variables_initializer()
         self._sess = session
+        self._sess = tf_debug.LocalCLIDebugWrapperSession(self._sess)
+        self._sess.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)
         self._sess.run(init_op)
 
     def _build_inputs(self):
