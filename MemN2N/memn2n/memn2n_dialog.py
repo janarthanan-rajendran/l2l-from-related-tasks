@@ -511,6 +511,7 @@ class MemN2NDialog(object):
                 weights_gated_qnet['gated_q_A'] = tf.Variable(gated_q_A, name="gated_q_A")
                 weights_gated_qnet['gated_q_H'] = tf.Variable(self._init([self._embedding_size, self._embedding_size]), name="gated_q_H")
                 weights_gated_qnet['gated_q_W'] = tf.Variable(self._init([self._embedding_size, 1]), name="gated_q_W")
+                weights_gated_qnet['gated_q_B'] = tf.Variable(self._init([1]), name="gated_q_B")
 
         if not (self._shared_context_w and self._shared_answer_w):  # TODO If only of them is True
             self._q_nil_vars = set([weights_qnet['q_A'].name, weights_qnet['q_W'].name]) #TODO
@@ -688,7 +689,7 @@ class MemN2NDialog(object):
 
                     q_u.append(q_u_k)
 
-                gate_weight = tf.nn.sigmoid(tf.matmul(q_u_k, weights['gated_q_W']))
+                gate_weight = tf.nn.sigmoid(tf.add(tf.matmul(q_u_k, weights['gated_q_W']), weights['gated_q_B']))
 
         return gate_weight
 
