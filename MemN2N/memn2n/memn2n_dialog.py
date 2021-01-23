@@ -775,7 +775,9 @@ class MemN2NDialog(object):
 
         feed_dict = {self._stories: stories, self._queries: queries, self._answers: answers, self._q_answers: q_answers,
                      self._p_stories: p_stories, self._p_queries: p_queries, self._p_answers: p_answers}
-        outer_loss, _, _ = self._sess.run([self.gated_outer_loss_op, self.gated_outer_train_op, self.check_op], feed_dict=feed_dict)
+        # outer_loss, _, _ = self._sess.run([self.gated_outer_loss_op, self.gated_outer_train_op, self.check_op], feed_dict=feed_dict)
+        outer_loss, _ = self._sess.run([self.gated_outer_loss_op, self.gated_outer_train_op], feed_dict=feed_dict)
+
 
         return outer_loss
 
