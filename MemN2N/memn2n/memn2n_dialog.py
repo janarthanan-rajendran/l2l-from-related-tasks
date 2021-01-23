@@ -133,7 +133,9 @@ class MemN2NDialog(object):
         # Define summary directory
         timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
         self.root_dir = "%s_%s_%s_%s/" % ('task', str(task_id),'summary_output', timestamp)
-        
+
+        tf.debugging.enable_check_numerics()
+
         # Calculate cross entropy
         # dimensions: (batch_size, candidates_size)
         if self._has_qnet:
@@ -282,10 +284,11 @@ class MemN2NDialog(object):
             # update anet with gated related task data
             r_gated_grads = tf.gradients(r_gated_loss_op, list(weights_anet.values()) + list(weights_anet_pred.values()) + list(
                 weights_anet_qnet.values()) + list(weights_anet_pred_qnet.values()))
+            r_gated_grads, _ = tf.clip_by_global_norm(r_gated_grads, self._max_grad_norm) 
             r_gated_grads_and_vars = zip(r_gated_grads, list(weights_anet.values()) + list(weights_anet_pred.values()) + list(
                 weights_anet_qnet.values()) + list(weights_anet_pred_qnet.values()))
-            r_gated_grads_and_vars = [(tf.clip_by_norm(g, self._max_grad_norm), v)
-                              for g, v in r_gated_grads_and_vars]
+            # r_gated_grads_and_vars = [(tf.clip_by_norm(g, self._max_grad_norm), v)
+            #                   for g, v in r_gated_grads_and_vars]
             r_gated_nil_grads_and_vars = []
             for g, v in r_gated_grads_and_vars:
                 if v.name in self._nil_vars:
@@ -297,7 +300,8 @@ class MemN2NDialog(object):
             # simulate the auxiliary update for anet
             gated_inner_grads = tf.gradients(r_gated_loss_op, list(weights_anet.values()) + list(weights_anet_pred.values())
                                              + list(weights_anet_qnet.values()) + list(weights_anet_pred_qnet.values()))
-            gated_inner_grads = [tf.clip_by_norm(grad, self._max_grad_norm) for grad in gated_inner_grads]
+            # gated_inner_grads = [tf.clip_by_norm(grad, self._max_grad_norm) for grad in gated_inner_grads]
+            gated_inner_grads, _ = tf.clip_by_global_norm(gated_inner_grads, self._max_grad_norm)
             gated_inner_nil_grads = []
             for g, v in zip(gated_inner_grads, list(weights_anet.values()) + list(weights_anet_pred.values())
                                                + list(weights_anet_qnet.values()) + list(weights_anet_pred_qnet.values())):
@@ -775,8 +779,8 @@ class MemN2NDialog(object):
 
         feed_dict = {self._stories: stories, self._queries: queries, self._answers: answers, self._q_answers: q_answers,
                      self._p_stories: p_stories, self._p_queries: p_queries, self._p_answers: p_answers}
-        outer_loss, _, _ = self._sess.run([self.gated_outer_loss_op, self.gated_outer_train_op, self.check_op], feed_dict=feed_dict)
-        # outer_loss, _ = self._sess.run([self.gated_outer_loss_op, self.gated_outer_train_op], feed_dict=feed_dict)
+        # outer_loss, _, _ = self._sess.run([self.gated_outer_loss_op, self.gated_outer_train_op, self.check_op], feed_dict=feed_dict)
+        outer_loss, _ = self._sess.run([self.gated_outer_loss_op, self.gated_outer_train_op], feed_dict=feed_dict)
 
 
         return outer_loss
