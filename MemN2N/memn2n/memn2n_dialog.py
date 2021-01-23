@@ -5,6 +5,7 @@ import tensorflow as tf
 import numpy as np
 from six.moves import range
 from datetime import datetime
+from tensorflow.python import debug as tf_debug
 
 
 class MemN2NDialog(object):
@@ -117,7 +118,7 @@ class MemN2NDialog(object):
         self._at_opt = tf.train.AdamOptimizer(learning_rate=1e-3, name='at_opt')
         self._r_opt = tf.train.AdamOptimizer(learning_rate=1e-3, name='r_opt')
         self._r_gated_opt = tf.train.AdamOptimizer(learning_rate=1e-3, name='r_gated_opt')
-        self._gated_outer_opt = tf.train.AdamOptimizer(learning_rate=1e-3, name='gated_outer_opt')
+        self._gated_outer_opt = tf.train.AdamOptimizer(learning_rate=1e-4, name='gated_outer_opt')
 
         # if self._has_qnet:
         #     self._shared_context_w = True
