@@ -398,14 +398,14 @@ class MemN2NDialog(object):
 
         # Define predict ops
         predict_op = tf.argmax(logits, 1, name="predict_op")
-        predict_proba_op = tf.nn.softmax(logits, name="predict_proba_op")
-        predict_log_proba_op = tf.log(predict_proba_op, name="predict_log_proba_op")
+        # predict_proba_op = tf.nn.softmax(logits, name="predict_proba_op")
+        # predict_log_proba_op = tf.log(predict_proba_op, name="predict_log_proba_op")
 
         # Assign ops
         self.loss_op = loss_op
         self.predict_op = predict_op
-        self.predict_proba_op = predict_proba_op
-        self.predict_log_proba_op = predict_log_proba_op
+        # self.predict_proba_op = predict_proba_op
+        # self.predict_log_proba_op = predict_log_proba_op
         self.train_op = train_op
         self.graph_output = self.loss_op
 
@@ -712,9 +712,9 @@ class MemN2NDialog(object):
                      self._answers: answers}
 
         if primary:
-            loss, _ = self._sess.run([self.loss_op, self.train_op], feed_dict=feed_dict)
+            loss, _, _ = self._sess.run([self.loss_op, self.train_op, self.check_op], feed_dict=feed_dict)
         else:
-            loss, _ = self._sess.run([self.r_loss_op, self.r_train_op], feed_dict=feed_dict)
+            loss, _, _ = self._sess.run([self.r_loss_op, self.r_train_op, self.check_op], feed_dict=feed_dict)
         return loss
 
     def gated_batch_fit(self, stories, queries, answers):
