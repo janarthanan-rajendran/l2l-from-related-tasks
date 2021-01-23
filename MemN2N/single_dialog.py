@@ -59,7 +59,7 @@ tf.flags.DEFINE_boolean('gated_qnet', True, 'gated qnet')
 
 
 FLAGS = tf.flags.FLAGS
-print("Started Task:", FLAGS.task_id)
+print("Started Task :) :", FLAGS.task_id)
 
 
 class chatBot(object):
