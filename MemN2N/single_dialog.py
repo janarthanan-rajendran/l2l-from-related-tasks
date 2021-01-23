@@ -472,7 +472,7 @@ class chatBot(object):
                         s = trainS[start:end]
                         q = trainQ[start:end]
                         a = trainA[start:end]
-                        # q_a = trainqA[start:end]
+                        q_a = trainqA[start:end]
                         cost_t_primary = self.model.batch_fit(s, q, a) # anet with primary update
 
                         total_cost += cost_t_outer + cost_t_aux + cost_t_primary
