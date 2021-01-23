@@ -116,7 +116,7 @@ class MemN2NDialog(object):
         self._qt_opt = tf.train.AdamOptimizer(learning_rate=1e-3, name='qt_opt')
         self._at_opt = tf.train.AdamOptimizer(learning_rate=1e-3, name='at_opt')
         self._r_opt = tf.train.AdamOptimizer(learning_rate=1e-3, name='r_opt')
-        self._r_gated_opt = tf.train.GradientDescentOptimizer(learning_rate=1e-3, name='r_gated_opt') #TODO
+        self._r_gated_opt = tf.train.AdamOptimizer(learning_rate=1e-3, name='r_gated_opt')
         self._gated_outer_opt = tf.train.AdamOptimizer(learning_rate=1e-3, name='gated_outer_opt')
 
         # if self._has_qnet:
@@ -307,12 +307,17 @@ class MemN2NDialog(object):
                     gated_inner_nil_grads.append(g)
 
             gated_fast_anet_weights = {}
+            gated_beta1_power, gated_beta2_power = self._r_gated_opt._get_beta_accumulators()
             for grad, var, var_name in zip(gated_inner_nil_grads, (list(weights_anet.values()) + list(weights_anet_pred.values())
                                                                    + list(weights_anet_qnet.values()) + list(weights_anet_pred_qnet.values())),
                                            (list(weights_anet.keys()) + list(weights_anet_pred.keys()) + list(weights_anet_qnet.keys())
                                             + list(weights_anet_pred_qnet.keys()))):
-                gated_fast_anet_weights[var_name] = var - self._inner_lr * grad
-
+                # gated_fast_anet_weights[var_name] = var - self._inner_lr * grad
+                lr_ = self._inner_lr * tf.sqrt(1 - gated_beta2_power) / (1 - gated_beta1_power)
+                m, v = self._r_gated_opt.get_slot(var, 'm'), self._r_gated_opt.get_slot(var, 'v')
+                m = m + (grad - m) * (1 - 0.9)
+                v = v + (tf.square(grad) - v) * (1 - 0.999)
+                gated_fast_anet_weights[var_name] = var - m * lr_ / (tf.sqrt(v + 1e-05))
 
             gated_outer_logits, _, _ = self._inference(gated_fast_anet_weights, self._p_stories, self._p_queries)
             gated_outer_cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
