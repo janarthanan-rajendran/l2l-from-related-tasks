@@ -299,7 +299,7 @@ class MemN2NDialog(object):
             # simulate the auxiliary update for anet
             gated_inner_grads = tf.gradients(r_gated_loss_op, list(weights_anet.values()) + list(weights_anet_pred.values())
                                              + list(weights_anet_qnet.values()) + list(weights_anet_pred_qnet.values()))
-            gated_inner_grads = [tf.clip_by_norm(grad, self._max_grad_norm) for grad in gated_inner_grads]
+            # gated_inner_grads = [tf.clip_by_norm(grad, self._max_grad_norm) for grad in gated_inner_grads]
             # gated_inner_grads, _ = tf.clip_by_global_norm(gated_inner_grads, self._max_grad_norm)
             gated_inner_nil_grads = []
             for g, v in zip(gated_inner_grads, list(weights_anet.values()) + list(weights_anet_pred.values())
