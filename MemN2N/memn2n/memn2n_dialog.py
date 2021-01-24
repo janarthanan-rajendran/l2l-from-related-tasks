@@ -440,12 +440,12 @@ class MemN2NDialog(object):
             self.gated_outer_loss_op = gated_outer_loss_op
             self.gated_outer_train_op = gated_outer_train_op
 
-            self.check_op = tf.add_check_numerics_ops()
+            # self.check_op = tf.add_check_numerics_ops()
 
         init_op = tf.global_variables_initializer()
         self._sess = session
-        self._sess = tf_debug.LocalCLIDebugWrapperSession(self._sess)
-        self._sess.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)
+        # self._sess = tf_debug.LocalCLIDebugWrapperSession(self._sess)
+        # self._sess.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)
         self._sess.run(init_op)
 
     def _build_inputs(self):
