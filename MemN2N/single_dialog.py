@@ -451,8 +451,9 @@ class chatBot(object):
 
                         total_cost += cost_t_related + cost_t_primary
                 elif self.gated_qnet:
+                    count = 0
                     for r_start, r_end in r_batches_r:
-
+                        count += 1
                         start, end = random.sample(batches, 1)[0]
                         r_s_p = trainS[start:end]
                         r_q_p = trainQ[start:end]
@@ -476,7 +477,8 @@ class chatBot(object):
                         cost_t_primary = self.model.batch_fit(s, q, a) # anet with primary update
 
                         total_cost += cost_t_outer + cost_t_aux + cost_t_primary
-                        # print("outer", cost_t_outer, "aux", cost_t_aux, "primary", cost_t_primary)
+                        if count % 50 == 0:
+                            print("count", count, "outer", cost_t_outer, "aux", cost_t_aux, "primary", cost_t_primary)
                 else:
                     if self.alternate:
                         if t % 2 == 0:
