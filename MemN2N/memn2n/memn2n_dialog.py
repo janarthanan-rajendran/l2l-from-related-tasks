@@ -284,10 +284,12 @@ class MemN2NDialog(object):
             r_gated_grads = tf.gradients(r_gated_loss_op, list(weights_anet.values()) + list(weights_anet_pred.values()) + list(
                 weights_anet_qnet.values()) + list(weights_anet_pred_qnet.values()))
             # r_gated_grads, _ = tf.clip_by_global_norm(r_gated_grads, self._max_grad_norm)
+            r_gated_grads = [tf.convert_to_tensor(g) + 1e-8 for g in r_gated_grads]
+            r_gated_grads = [tf.clip_by_norm(g, self._max_grad_norm) for g in r_gated_grads]
+
             r_gated_grads_and_vars = zip(r_gated_grads, list(weights_anet.values()) + list(weights_anet_pred.values()) + list(
                 weights_anet_qnet.values()) + list(weights_anet_pred_qnet.values()))
-            r_gated_grads_and_vars = [(tf.clip_by_norm(g, self._max_grad_norm), v)
-                              for g, v in r_gated_grads_and_vars]
+            # r_gated_grads_and_vars = [(tf.clip_by_norm((g + 1e-8), self._max_grad_norm), v) for g, v in r_gated_grads_and_vars]
             r_gated_nil_grads_and_vars = []
             for g, v in r_gated_grads_and_vars:
                 if v.name in self._nil_vars:
@@ -299,7 +301,8 @@ class MemN2NDialog(object):
             # simulate the auxiliary update for anet
             gated_inner_grads = tf.gradients(r_gated_loss_op, list(weights_anet.values()) + list(weights_anet_pred.values())
                                              + list(weights_anet_qnet.values()) + list(weights_anet_pred_qnet.values()))
-            # gated_inner_grads = [tf.clip_by_norm(grad, self._max_grad_norm) for grad in gated_inner_grads]
+            gated_inner_grads = [tf.convert_to_tensor(g) + 1e-8 for g in gated_inner_grads]
+            gated_inner_grads = [tf.clip_by_norm(grad, self._max_grad_norm) for grad in gated_inner_grads]
             # gated_inner_grads, _ = tf.clip_by_global_norm(gated_inner_grads, self._max_grad_norm)
             gated_inner_nil_grads = []
             for g, v in zip(gated_inner_grads, list(weights_anet.values()) + list(weights_anet_pred.values())
@@ -320,7 +323,7 @@ class MemN2NDialog(object):
                 m, v = self._r_gated_opt.get_slot(var, 'm'), self._r_gated_opt.get_slot(var, 'v')
                 m = m + (grad - m) * (1 - 0.9)
                 v = v + (tf.square(grad) - v) * (1 - 0.999)
-                gated_fast_anet_weights[var_name] = var - m * lr_ / (tf.sqrt(v + 1e-05))
+                gated_fast_anet_weights[var_name] = var - m * lr_ / (tf.sqrt(v + 1e-08))
 
             gated_outer_logits, _, _ = self._inference(gated_fast_anet_weights, self._p_stories, self._p_queries)
             gated_outer_cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
@@ -903,7 +906,7 @@ def zero_nil_slot(t, name=None):
         return tf.concat(axis=0, values=[z, tf.slice(t, [1, 0], [-1, -1])], name=name)
 
 
-def add_gradient_noise(t, stddev=1e-3, name=None):
+def add_gradient_noise(t, stddev=1e-5, name=None):
     """Adds gradient noise as described in http://arxiv.org/abs/1511.06807 [2].
 
     The input Tensor `t` should be a gradient.

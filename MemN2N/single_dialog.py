@@ -477,7 +477,7 @@ class chatBot(object):
                         cost_t_primary = self.model.batch_fit(s, q, a) # anet with primary update
 
                         total_cost += cost_t_outer + cost_t_aux + cost_t_primary
-                        if count % 50 == 0:
+                        if count % 100 == 0:
                             print("count", count, "outer", cost_t_outer, "aux", cost_t_aux, "primary", cost_t_primary)
                 else:
                     if self.alternate:
