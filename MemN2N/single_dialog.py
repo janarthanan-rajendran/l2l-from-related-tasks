@@ -55,7 +55,9 @@ tf.flags.DEFINE_boolean('copy_qnet2anet', False, 'if True copy qnet to anet befo
 tf.flags.DEFINE_boolean('transform_qnet', False, 'if True train qnet_aux with primary data to match anet u_k')
 tf.flags.DEFINE_boolean('transform_anet', False, 'if True train anet(u_k) with related data to match qnet_aux')
 tf.flags.DEFINE_boolean('primary_and_related', False, 'if True train anet(u_k) with related data  and primary data')
-tf.flags.DEFINE_boolean('gated_qnet', True, 'gated qnet')
+tf.flags.DEFINE_boolean('gated_qnet', False, 'gated qnet')
+tf.flags.DEFINE_float("outer_r_weight", 0, "Weight of the related task loss in the outer loop")
+
 
 
 FLAGS = tf.flags.FLAGS
@@ -91,7 +93,8 @@ class chatBot(object):
                  transform_qnet=False,
                  transform_anet=False,
                  primary_and_related=False,
-                 gated_qnet=False):
+                 gated_qnet=False,
+                 outer_r_weight=0):
         """Creates wrapper for training and testing a chatbot model.
 
         Args:
@@ -190,6 +193,7 @@ class chatBot(object):
         self.transform_anet = transform_anet
         self.primary_and_related = primary_and_related
         self.gated_qnet = gated_qnet
+        self.outer_r_weight = outer_r_weight
 
         candidates,self.candid2indx = load_candidates(self.data_dir, self.task_id, True)
         self.n_cand = len(candidates)
@@ -254,7 +258,7 @@ class chatBot(object):
                                   optimizer=optimizer, outer_optimizer=outer_optimizer, aux_optimizer=aux_optimizer, task_id=task_id,
                                   inner_lr=self.aux_learning_rate, aux_opt_name=self.aux_opt, alpha=self.alpha,
                                   epsilon=self.epsilon, aux_nonlin=self.aux_nonlin, m_series=self.m_series,
-                                  r_candidates_vec=self.r_candidates_vec)
+                                  r_candidates_vec=self.r_candidates_vec, outer_r_weight=self.outer_r_weight)
 
         self.saver = tf.train.Saver(max_to_keep=50)
         
@@ -734,7 +738,7 @@ if __name__ == '__main__':
                       epsilon=FLAGS.epsilon, only_primary=FLAGS.only_primary, max_grad_norm=FLAGS.max_grad_norm,
                       aux_nonlin=FLAGS.aux_nonlin, m_series=FLAGS.m_series, only_related=FLAGS.only_related,
                       transform_qnet=FLAGS.transform_qnet, transform_anet=FLAGS.transform_anet,
-                      primary_and_related=FLAGS.primary_and_related, gated_qnet=FLAGS.gated_qnet)
+                      primary_and_related=FLAGS.primary_and_related, gated_qnet=FLAGS.gated_qnet, outer_r_weight=FLAGS.outer_r_weight)
 
     if FLAGS.train:
         chatbot.train()

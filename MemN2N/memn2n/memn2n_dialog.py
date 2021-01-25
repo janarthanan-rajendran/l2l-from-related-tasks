@@ -29,7 +29,8 @@ class MemN2NDialog(object):
                  epsilon=1e-8,
                  aux_nonlin=None,
                  m_series=False,
-                 r_candidates_vec=None):
+                 r_candidates_vec=None,
+                 outer_r_weight=0):
         """Creates an End-To-End Memory Network
 
         Args:
@@ -119,6 +120,7 @@ class MemN2NDialog(object):
         self._r_opt = tf.train.AdamOptimizer(learning_rate=1e-3, name='r_opt')
         self._r_gated_opt = tf.train.AdamOptimizer(learning_rate=1e-3, name='r_gated_opt')
         self._gated_outer_opt = tf.train.AdamOptimizer(learning_rate=1e-3, name='gated_outer_opt')
+        self._outer_r_weight = outer_r_weight
 
         # if self._has_qnet:
         #     self._shared_context_w = True
@@ -327,11 +329,19 @@ class MemN2NDialog(object):
                 v = v + (tf.square(grad) - v) * (1 - 0.999)
                 gated_fast_anet_weights[var_name] = var - m * lr_ / (tf.sqrt(v + 1e-08))
 
-            gated_outer_logits, _, _ = self._inference(gated_fast_anet_weights, self._p_stories, self._p_queries)
-            gated_outer_cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
-                logits=gated_outer_logits, labels=self._p_answers, name="gated_outer_cross_entropy")
-            gated_outer_cross_entropy_sum = tf.reduce_sum(gated_outer_cross_entropy, name="gated_outer_cross_entropy_sum")
-            gated_outer_loss_op = gated_outer_cross_entropy_sum
+            gated_outer_p_logits, _, _ = self._inference(gated_fast_anet_weights, self._p_stories, self._p_queries)
+            gated_outer_p_cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
+                logits=gated_outer_p_logits, labels=self._p_answers, name="gated_outer_p_cross_entropy")
+            gated_outer_p_cross_entropy_sum = tf.reduce_sum(gated_outer_p_cross_entropy, name="gated_outer_p_cross_entropy_sum")
+            gated_outer_p_loss_op = gated_outer_p_cross_entropy_sum
+
+            _, _, gated_outer_r_logits = self._inference(gated_fast_anet_weights, self._stories, self._queries)
+            gated_outer_r_cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
+                logits=gated_outer_r_logits, labels=self._answers, name="gated_outer_r_cross_entropy")
+            gated_outer_r_cross_entropy_sum = tf.reduce_sum(gated_outer_r_cross_entropy, name="gated_outer_r_cross_entropy_sum")
+            gated_outer_r_loss_op = gated_outer_r_cross_entropy_sum
+
+            gated_outer_loss_op = gated_outer_p_loss_op + self._outer_r_weight * gated_outer_r_loss_op
 
             # Update qnet (gated)
             gated_outer_grads = tf.gradients(gated_outer_loss_op, list(weights_gated_qnet.values()))
