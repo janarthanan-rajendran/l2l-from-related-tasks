@@ -580,6 +580,7 @@ class chatBot(object):
                 print('Total Cost:', total_cost)
                 print('Training Accuracy:', train_acc)
                 print('Validation Accuracy:', val_acc)
+                print('Best Validation Accuracy:', best_validation_accuracy)
                 print('-----------------------')
 
                 # Write summary
