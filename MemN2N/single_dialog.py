@@ -59,9 +59,7 @@ tf.flags.DEFINE_boolean('gated_qnet', False, 'gated qnet')
 tf.flags.DEFINE_float("outer_r_weight", 0, "Weight of the related task loss in the outer loop")
 tf.flags.DEFINE_integer("qnet_hops", 3, "Number of hops in the qnet Memory Network.")
 tf.flags.DEFINE_boolean('copy_qnet2gqnet', False, 'if True copy qnet to gated qnet before starting training')
-
-
-
+tf.flags.DEFINE_boolean('separate_eval', False, 'if True split eval data from primary')
 
 
 FLAGS = tf.flags.FLAGS
@@ -467,7 +465,10 @@ class chatBot(object):
                     count = 0
                     for r_start, r_end in r_batches_r:
                         count += 1
-                        start, end = random.sample(batches, 1)[0]
+                        if FLAGS.separate_eval:
+                            start, end = random.sample(r_batches_p, 1)[0]
+                        else:
+                            start, end = random.sample(batches, 1)[0]
                         r_s_p = trainS[start:end]
                         r_q_p = trainQ[start:end]
                         r_a_p = trainA[start:end]
@@ -482,7 +483,10 @@ class chatBot(object):
 
                         cost_t_aux, aux_gate = self.model.gated_batch_fit(r_s, r_q, r_a) #anet with aux update with related data
 
-                        start, end = random.sample(batches, 1)[0]
+                        if FLAGS.separate_eval:
+                            start, end = random.sample(p_batches, 1)[0]
+                        else:
+                            start, end = random.sample(batches, 1)[0]
                         s = trainS[start:end]
                         q = trainQ[start:end]
                         a = trainA[start:end]
