@@ -30,7 +30,8 @@ class MemN2NDialog(object):
                  aux_nonlin=None,
                  m_series=False,
                  r_candidates_vec=None,
-                 outer_r_weight=0):
+                 outer_r_weight=0,
+                 qnet_hops=3):
         """Creates an End-To-End Memory Network
 
         Args:
@@ -95,7 +96,7 @@ class MemN2NDialog(object):
         self._sentence_size = sentence_size
         self._embedding_size = embedding_size
         self._hops = hops
-        self._qnet_hops = 3
+        self._qnet_hops = qnet_hops
         self._gated_qnet_hops = 1
         self._max_grad_norm = max_grad_norm
         self._nonlin = nonlin
@@ -396,8 +397,13 @@ class MemN2NDialog(object):
                 assign_h = weights_anet['H'].assign(weights_qnet['q_H'])
                 assign_w = weights_anet_pred['W'].assign(weights_qnet['q_W'])
                 assign_qnet2anet_op = [assign_a, assign_h, assign_w]
+
+                assign_gated_a = weights_gated_qnet['gated_q_A'].assign(weights_qnet['q_A'])
+                assign_gated_h = weights_gated_qnet['gated_q_H'].assign(weights_qnet['q_H'])
+                assign_qnet2gqnet_op = [assign_gated_a, assign_gated_h]
             else:
                 assign_qnet2anet_op = None
+                assign_qnet2gqnet_op = None
         else:
             # Gradient pipeline
             grads_and_vars = self._opt.compute_gradients(loss_op,
@@ -445,6 +451,7 @@ class MemN2NDialog(object):
             self.at_train_op = at_train_op
 
             self.assign_qnet2anet_op = assign_qnet2anet_op
+            self.assign_qnet2gqnet_op = assign_qnet2gqnet_op
 
             self.r_loss_op = r_loss_op
             self.r_train_op = r_train_op
@@ -454,6 +461,8 @@ class MemN2NDialog(object):
 
             self.gated_outer_loss_op = gated_outer_loss_op
             self.gated_outer_train_op = gated_outer_train_op
+
+            self.aux_gate = aux_gate
 
             # self.check_op = tf.add_check_numerics_ops()
 
@@ -751,8 +760,8 @@ class MemN2NDialog(object):
 
         feed_dict = {self._stories: stories, self._queries: queries, self._answers: answers}
 
-        loss, _ = self._sess.run([self.r_gated_loss_op, self.r_gated_train_op], feed_dict=feed_dict)
-        return loss
+        loss, _, aux_gate = self._sess.run([self.r_gated_loss_op, self.r_gated_train_op, self.aux_gate], feed_dict=feed_dict)
+        return loss, aux_gate
 
     def q_batch_fit(self, stories, queries, answers, q_answers, p_stories=None, p_queries=None, p_answers=None, primary=True):
         """Runs the training algorithm over the passed batch
@@ -902,6 +911,10 @@ class MemN2NDialog(object):
 
     def copy_qnet2anet(self):
         self._sess.run(self.assign_qnet2anet_op)
+
+
+    def copy_qnet2gqnet(self):
+        self._sess.run(self.assign_qnet2gqnet_op)
 
 
 def zero_nil_slot(t, name=None):

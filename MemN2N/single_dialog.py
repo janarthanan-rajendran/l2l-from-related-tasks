@@ -57,6 +57,10 @@ tf.flags.DEFINE_boolean('transform_anet', False, 'if True train anet(u_k) with r
 tf.flags.DEFINE_boolean('primary_and_related', False, 'if True train anet(u_k) with related data  and primary data')
 tf.flags.DEFINE_boolean('gated_qnet', False, 'gated qnet')
 tf.flags.DEFINE_float("outer_r_weight", 0, "Weight of the related task loss in the outer loop")
+tf.flags.DEFINE_integer("qnet_hops", 3, "Number of hops in the qnet Memory Network.")
+tf.flags.DEFINE_boolean('copy_qnet2gqnet', False, 'if True copy qnet to gated qnet before starting training')
+
+
 
 
 
@@ -258,7 +262,8 @@ class chatBot(object):
                                   optimizer=optimizer, outer_optimizer=outer_optimizer, aux_optimizer=aux_optimizer, task_id=task_id,
                                   inner_lr=self.aux_learning_rate, aux_opt_name=self.aux_opt, alpha=self.alpha,
                                   epsilon=self.epsilon, aux_nonlin=self.aux_nonlin, m_series=self.m_series,
-                                  r_candidates_vec=self.r_candidates_vec, outer_r_weight=self.outer_r_weight)
+                                  r_candidates_vec=self.r_candidates_vec, outer_r_weight=self.outer_r_weight,
+                                  qnet_hops = FLAGS.qnet_hops)
 
         self.saver = tf.train.Saver(max_to_keep=50)
         
@@ -380,6 +385,10 @@ class chatBot(object):
             self.model.copy_qnet2anet()
             print("Qnet copied to anet")
 
+        if FLAGS.copy_qnet2gqnet:
+            self.model.copy_qnet2gqnet()
+            print("Qnet copied to gated qnet")
+
         for t in range(1, self.epochs+1):
             print('Epoch', t)
             np.random.shuffle(batches)
@@ -471,7 +480,7 @@ class chatBot(object):
 
                         cost_t_outer = self.model.gated_q_batch_fit(r_s, r_q, r_a, r_q_a, r_s_p, r_q_p, r_a_p) #gated qnet update
 
-                        cost_t_aux = self.model.gated_batch_fit(r_s, r_q, r_a) #anet with aux update with related data
+                        cost_t_aux, aux_gate = self.model.gated_batch_fit(r_s, r_q, r_a) #anet with aux update with related data
 
                         start, end = random.sample(batches, 1)[0]
                         s = trainS[start:end]
@@ -483,6 +492,7 @@ class chatBot(object):
                         total_cost += cost_t_outer + cost_t_aux + cost_t_primary
                         if count % 100 == 0:
                             print("count", count, "outer", cost_t_outer, "aux", cost_t_aux, "primary", cost_t_primary)
+                            print("Aux_gate", aux_gate)
                 else:
                     if self.alternate:
                         if t % 2 == 0:
