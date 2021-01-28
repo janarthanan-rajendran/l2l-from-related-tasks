@@ -8,7 +8,7 @@ import tensorflow as tf
 stop_words = set(["a","an","the"])
 
 
-def load_candidates(data_dir, task_id, primary):
+def load_candidates(data_dir, task_id, primary, r1):
     """Load bot response candidates."""
     assert task_id > 0 and task_id < 6
 
@@ -16,7 +16,10 @@ def load_candidates(data_dir, task_id, primary):
     candidates_f=None
     candid_dic={}
     if not primary:
-        candidates_f = './dialog-babi-candidates.txt'
+        if r1:
+            candidates_f = './joint-dialog-babi-candidates.txt'
+        else:
+            candidates_f = './dialog-babi-candidates.txt'
     else:
         candidates_f='./personalized-dialog-candidates.txt'
     with open(os.path.join(data_dir,candidates_f)) as f:

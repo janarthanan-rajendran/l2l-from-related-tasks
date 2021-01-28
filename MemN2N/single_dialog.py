@@ -60,7 +60,8 @@ tf.flags.DEFINE_float("outer_r_weight", 0, "Weight of the related task loss in t
 tf.flags.DEFINE_integer("qnet_hops", 3, "Number of hops in the qnet Memory Network.")
 tf.flags.DEFINE_boolean('copy_qnet2gqnet', False, 'if True copy qnet to gated qnet before starting training')
 tf.flags.DEFINE_boolean('separate_eval', False, 'if True split eval data from primary')
-
+tf.flags.DEFINE_boolean('r1', False, 'if True second related task')
+tf.flags.DEFINE_string("r1_data_dir", "../data/personalized-dialog-dataset/small-r1-10", "Directory containing r1 related tasks")
 
 FLAGS = tf.flags.FLAGS
 print("Started Task :)) :", FLAGS.task_id)
@@ -197,14 +198,14 @@ class chatBot(object):
         self.gated_qnet = gated_qnet
         self.outer_r_weight = outer_r_weight
 
-        candidates,self.candid2indx = load_candidates(self.data_dir, self.task_id, True)
+        candidates,self.candid2indx = load_candidates(self.data_dir, self.task_id, True, FLAGS.r1)
         self.n_cand = len(candidates)
         print("Candidate Size", self.n_cand)
         self.indx2candid = dict((self.candid2indx[key],key) 
                                 for key in self.candid2indx)
 
         if self.has_qnet:
-            r_candidates, self.r_candid2indx = load_candidates(self.r_data_dir, self.r_task_id, False)
+            r_candidates, self.r_candid2indx = load_candidates(self.r_data_dir, self.r_task_id, False, FLAGS.r1)
             self.r_n_cand = len(r_candidates)
             print("R Candidate Size", self.r_n_cand)
             self.r_indx2candid = dict((self.r_candid2indx[key], key)
@@ -219,6 +220,11 @@ class chatBot(object):
             self.r_trainData, self.r_testData, self.r_valData = r_load_dialog_task(
                 self.r_data_dir, self.r_task_id, self.r_candid2indx, self.OOV)
             data = data + self.r_trainData + self.r_valData + self.r_testData
+
+            if FLAGS.r1:
+                self.r1_trainData, _, _ = load_dialog_task(
+                    FLAGS.r1_data_dir, self.task_id, self.r_candid2indx, self.OOV)
+                data = data + self.r1_trainData
 
         if self.has_qnet:
             self.build_vocab(data,candidates,self.save_vocab,self.load_vocab, r_candidates)
@@ -347,6 +353,28 @@ class chatBot(object):
             n_r_train = len(r_trainS)
             print("Related Task Trainign Size", n_r_train)
 
+            if FLAGS.r1:
+                r1_trainS, r1_trainQ, r1_trainA, r1_trainqA = vectorize_data(
+                    self.r1_trainData, self.word_idx, self.sentence_size, self.r_candidate_sentence_size,
+                    self.batch_size, self.r_n_cand, self.memory_size)
+                n_r1_train = len(r1_trainS)
+                print("Second Related Task Trainign Size", n_r1_train)
+
+                A_qA = list(zip(r1_trainA, r1_trainqA))
+                np.random.seed(0)
+                np.random.shuffle(A_qA)
+                r1_trainA, r1_trainqA = zip(*A_qA)
+
+                # print(type(r_trainA), type(r_trainA[0:int(n_r_train/self.batch_size)*self.batch_size]), type(r1_trainA))
+
+                r_trainS = r_trainS[0:int(n_r_train/self.batch_size)*self.batch_size] + r1_trainS
+                r_trainQ = r_trainQ[0:int(n_r_train/self.batch_size)*self.batch_size] + r1_trainQ
+                r_trainA = r_trainA[0:int(n_r_train/self.batch_size)*self.batch_size] + list(r1_trainA)
+                r_trainqA = r_trainqA[0:int(n_r_train/self.batch_size)*self.batch_size] + list(r1_trainqA)
+
+                n_r_train = len(r_trainS)
+                print("joint related task trainin size", n_r_train)
+
         valS, valQ, valA, _ = vectorize_data(
             self.valData, self.word_idx, self.sentence_size, self.candidate_sentence_size,
             self.batch_size, self.n_cand, self.memory_size)
@@ -375,6 +403,7 @@ class chatBot(object):
             r_batches_r = zip(range(0, n_r_train-self.batch_size, self.batch_size),
                           range(self.batch_size, n_r_train, self.batch_size))
             r_batches_r = [(start, end) for start, end in r_batches_r]
+
 
         # Training loop
         start_time = time.process_time()
@@ -446,6 +475,7 @@ class chatBot(object):
                         cost_t = self.model.batch_fit_at(s, q, a)
                         total_cost += cost_t
                 elif self.primary_and_related:
+                    count = 0
                     for r_start, r_end in r_batches_r:
                         s = r_trainS[r_start:r_end]
                         q = r_trainQ[r_start:r_end]
@@ -460,7 +490,11 @@ class chatBot(object):
                         # q_a = trainqA[start:end]
                         cost_t_primary = self.model.batch_fit(s, q, a)
 
+                        if count % 100 == 0:
+                            print("related", cost_t_related, "primary", cost_t_primary)
+
                         total_cost += cost_t_related + cost_t_primary
+                        count += 1
                 elif self.gated_qnet:
                     count = 0
                     for r_start, r_end in r_batches_r:
