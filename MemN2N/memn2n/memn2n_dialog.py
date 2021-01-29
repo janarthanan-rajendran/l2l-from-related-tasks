@@ -466,6 +466,8 @@ class MemN2NDialog(object):
 
             self.aux_gate = aux_gate
 
+            self.gated_outer_predict_op = tf.argmax(gated_outer_p_logits, 1, name='gated_outer_predict_op')
+
             # self.check_op = tf.add_check_numerics_ops()
 
         init_op = tf.global_variables_initializer()
@@ -812,10 +814,10 @@ class MemN2NDialog(object):
         feed_dict = {self._stories: stories, self._queries: queries, self._answers: answers, self._q_answers: q_answers,
                      self._p_stories: p_stories, self._p_queries: p_queries, self._p_answers: p_answers}
         # outer_loss, _, _ = self._sess.run([self.gated_outer_loss_op, self.gated_outer_train_op, self.check_op], feed_dict=feed_dict)
-        outer_loss, _ = self._sess.run([self.gated_outer_loss_op, self.gated_outer_train_op], feed_dict=feed_dict)
+        outer_loss, _, aux_gate = self._sess.run([self.gated_outer_loss_op, self.gated_outer_train_op, self.aux_gate], feed_dict=feed_dict)
 
 
-        return outer_loss
+        return outer_loss, aux_gate
 
     def q_batch_fit_r(self, stories, queries, answers):
         """Runs the training algorithm over the passed batch
@@ -915,6 +917,21 @@ class MemN2NDialog(object):
             return self._sess.run(self.q_predict_op, feed_dict=feed_dict)
         else:
             return self._sess.run(self.predict_op, feed_dict=feed_dict)
+
+    def predict_gated_outer(self, stories, queries, answers, q_answers, p_stories=None, p_queries=None):
+        """Predicts answers as one-hot encoding.
+
+        Args:
+            stories: Tensor (None, memory_size, sentence_size)
+            queries: Tensor (None, sentence_size)
+
+        Returns:
+            answers: Tensor (None, vocab_size)
+        """
+        feed_dict = {self._stories: stories, self._queries: queries, self._answers: answers, self._q_answers: q_answers,
+                     self._p_stories: p_stories, self._p_queries: p_queries}
+
+        return self._sess.run(self.gated_outer_predict_op, feed_dict=feed_dict)
 
     def copy_qnet2anet(self):
         self._sess.run(self.assign_qnet2anet_op)

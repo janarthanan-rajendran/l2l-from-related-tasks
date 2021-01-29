@@ -63,6 +63,10 @@ tf.flags.DEFINE_boolean('separate_eval', False, 'if True split eval data from pr
 tf.flags.DEFINE_boolean('r1', False, 'if True second related task')
 tf.flags.DEFINE_string("r1_data_dir", "../data/personalized-dialog-dataset/small-r1-10", "Directory containing r1 related tasks")
 tf.flags.DEFINE_string("gate_nonlin", None, "nonlinearity at the end gated qnet")
+tf.flags.DEFINE_boolean('only_gated_qnet', False, 'if True update only gated qnet')
+tf.flags.DEFINE_boolean('only_gated_aux', False, 'if True update only anet with gated_aux')
+tf.flags.DEFINE_boolean('only_gated_aux_primary', False, 'if True update only anet with gated aux and with primary')
+
 
 
 FLAGS = tf.flags.FLAGS
@@ -361,6 +365,7 @@ class chatBot(object):
                     self.batch_size, self.r_n_cand, self.memory_size)
                 n_r1_train = len(r1_trainS)
                 print("Second Related Task Trainign Size", n_r1_train)
+                n_r_orig_train = len(r_trainS[0:int(n_r_train/self.batch_size)*self.batch_size])
 
                 A_qA = list(zip(r1_trainA, r1_trainqA))
                 np.random.seed(0)
@@ -397,8 +402,10 @@ class chatBot(object):
         batches = [(start, end) for start, end in batches]
         best_validation_accuracy=0
         best_validation_loss = np.inf
+        best_validation_epoch = 0
 
         if self.has_qnet:
+            np.random.seed(0)
             np.random.shuffle(batches)
             p_batches = batches[:int(len(batches)/2)]
             r_batches_p = batches[int(len(batches)/2):]
@@ -445,13 +452,22 @@ class chatBot(object):
                             print('outer_cost', outer_cost_t, 'aux_cost', aux_cost_t)
                         total_cost += cost_t
                 elif self.only_primary:
-                    for start, end in batches:
-                        s = trainS[start:end]
-                        q = trainQ[start:end]
-                        a = trainA[start:end]
-                        # q_a = trainqA[start:end]
-                        cost_t = self.model.batch_fit(s, q, a)
-                        total_cost += cost_t
+                    if FLAGS.separate_eval:
+                        for start, end in p_batches:
+                            s = trainS[start:end]
+                            q = trainQ[start:end]
+                            a = trainA[start:end]
+                            # q_a = trainqA[start:end]
+                            cost_t = self.model.batch_fit(s, q, a)
+                            total_cost += cost_t
+                    else:
+                        for start, end in batches:
+                            s = trainS[start:end]
+                            q = trainQ[start:end]
+                            a = trainA[start:end]
+                            # q_a = trainqA[start:end]
+                            cost_t = self.model.batch_fit(s, q, a)
+                            total_cost += cost_t
                 elif self.only_related:
                     for start, end in r_batches_r:
                         s = r_trainS[start:end]
@@ -497,6 +513,77 @@ class chatBot(object):
 
                         total_cost += cost_t_related + cost_t_primary
                         count += 1
+                elif FLAGS.only_gated_qnet:
+                    count = 0
+                    gate_r1 = 0
+                    for r_start, r_end in r_batches_r:
+                        count += 1
+                        if FLAGS.separate_eval:
+                            start, end = random.sample(r_batches_p, 1)[0]
+                        else:
+                            start, end = random.sample(batches, 1)[0]
+                        r_s_p = trainS[start:end]
+                        r_q_p = trainQ[start:end]
+                        r_a_p = trainA[start:end]
+                        r_q_a_p = trainqA[start:end]
+
+                        r_s = r_trainS[r_start:r_end]
+                        r_q = r_trainQ[r_start:r_end]
+                        r_a = r_trainA[r_start:r_end]
+                        r_q_a = r_trainqA[r_start:r_end]
+
+                        cost_t_outer, aux_gate = self.model.gated_q_batch_fit(r_s, r_q, r_a, r_q_a, r_s_p, r_q_p, r_a_p) #gated qnet update
+                        total_cost += cost_t_outer
+
+                        if r_start >= n_r_orig_train:
+                            gate_r1 += np.sum(aux_gate)
+                        if count % 100 == 0:
+                            print("count", count, "outer", cost_t_outer)
+                    print("Ratio of gate_r1/r1: ", gate_r1/n_r1_train)
+                elif FLAGS.only_gated_aux:
+                    count = 0
+                    gate_r1 = 0
+                    for r_start, r_end in r_batches_r:
+                        count += 1
+                        r_s = r_trainS[r_start:r_end]
+                        r_q = r_trainQ[r_start:r_end]
+                        r_a = r_trainA[r_start:r_end]
+                        r_q_a = r_trainqA[r_start:r_end]
+
+                        cost_t_aux, aux_gate = self.model.gated_batch_fit(r_s, r_q, r_a) #anet with aux update with related data
+                        total_cost += cost_t_aux
+                        if r_start >= n_r_orig_train:
+                            gate_r1 += np.sum(aux_gate)
+                        if count % 100 == 0:
+                            print("count", count, "aux", cost_t_aux)
+                            # print("Aux_gate", aux_gate)
+                    print("Ratio of gate_r1/r1: ", gate_r1/n_r1_train)
+
+                elif FLAGS.only_gated_aux_primary:
+                    count = 0
+                    for r_start, r_end in r_batches_r:
+                        count += 1
+                        r_s = r_trainS[r_start:r_end]
+                        r_q = r_trainQ[r_start:r_end]
+                        r_a = r_trainA[r_start:r_end]
+                        r_q_a = r_trainqA[r_start:r_end]
+
+                        cost_t_aux, aux_gate = self.model.gated_batch_fit(r_s, r_q, r_a) #anet with aux update with related data
+
+                        if FLAGS.separate_eval:
+                            start, end = random.sample(p_batches, 1)[0]
+                        else:
+                            start, end = random.sample(batches, 1)[0]
+                        s = trainS[start:end]
+                        q = trainQ[start:end]
+                        a = trainA[start:end]
+                        q_a = trainqA[start:end]
+                        cost_t_primary = self.model.batch_fit(s, q, a) # anet with primary update
+
+                        total_cost +=  cost_t_aux + cost_t_primary
+                        if count % 100 == 0:
+                            print("count", count, "aux", cost_t_aux, "primary", cost_t_primary)
+                            # print("Aux_gate", aux_gate)
                 elif self.gated_qnet:
                     count = 0
                     for r_start, r_end in r_batches_r:
@@ -515,7 +602,7 @@ class chatBot(object):
                         r_a = r_trainA[r_start:r_end]
                         r_q_a = r_trainqA[r_start:r_end]
 
-                        cost_t_outer = self.model.gated_q_batch_fit(r_s, r_q, r_a, r_q_a, r_s_p, r_q_p, r_a_p) #gated qnet update
+                        cost_t_outer, _ = self.model.gated_q_batch_fit(r_s, r_q, r_a, r_q_a, r_s_p, r_q_p, r_a_p) #gated qnet update
 
                         cost_t_aux, aux_gate = self.model.gated_batch_fit(r_s, r_q, r_a) #anet with aux update with related data
 
@@ -622,6 +709,9 @@ class chatBot(object):
                 elif self.has_qnet and self.only_related:
                     val_preds = self.batch_predict(r_valS, r_valQ, n_r_val, 'qnet')
                     val_acc = metrics.accuracy_score(val_preds, r_valA)
+                elif self.has_qnet and FLAGS.only_gated_qnet:
+                    val_preds, val_ans = self.batch_predict_gated_outer(r_trainS, r_trainQ, r_trainA, r_trainqA, n_r_train, valS, valQ, valA, n_val)
+                    val_acc = metrics.accuracy_score(val_preds, val_ans)
                 else:
                     val_preds = self.batch_predict(valS,valQ,n_val, 'anet')
                     val_acc = metrics.accuracy_score(val_preds, valA)
@@ -630,7 +720,6 @@ class chatBot(object):
                 print('Total Cost:', total_cost)
                 print('Training Accuracy:', train_acc)
                 print('Validation Accuracy:', val_acc)
-                print('Best Validation Accuracy:', best_validation_accuracy)
                 print('-----------------------')
 
                 # Write summary
@@ -654,9 +743,13 @@ class chatBot(object):
                 else:
                     if val_acc > best_validation_accuracy:
                         best_validation_accuracy=val_acc
+                        best_validation_epoch = t
                         self.saver.save(self.sess,self.model_dir+'model.ckpt',
                                         global_step=t)
                         print("new model stored")
+                print('Best Validation Accuracy:', best_validation_accuracy)
+                print('Best Validation Epoch:', best_validation_epoch)
+
         time_taken = time.process_time() - start_time
         print("Time taken", time_taken)
 
@@ -726,6 +819,40 @@ class chatBot(object):
             pred = self.model.predict(s, q, predict_qnet)
             preds += list(pred)
         return preds
+
+    def batch_predict_gated_outer(self,r_S,r_Q,r_A, r_qA, r_n, S, Q, A, n):
+        """Predict answers over the passed data in batches.
+
+        Args:
+            S: Tensor (None, memory_size, sentence_size)
+            Q: Tensor (None, sentence_size)
+            n: int
+
+        Returns:
+            preds: Tensor (None, vocab_size)
+        """
+
+        preds = []
+        ans = []
+        for start in range(0, r_n, self.batch_size):
+            end = start + self.batch_size
+            for start_p in range(0, n, self.batch_size):
+                end_p = start_p + self.batch_size
+                r_s_p = S[start_p:end_p]
+                r_q_p = Q[start_p:end_p]
+                r_a_p = A[start_p:end_p]
+                # r_q_a_p = trainqA[start_p:end_p]
+
+                r_s = r_S[start:end]
+                r_q = r_Q[start:end]
+                r_a = r_A[start:end]
+                r_q_a = r_qA[start:end]
+
+                pred = self.model.predict_gated_outer(r_s, r_q, r_a, r_q_a, r_s_p, r_q_p)  # gated qnet update
+                preds += list(pred)
+                ans += list(r_a_p)
+
+        return preds, ans
 
     def batch_predict_qt(self,S,Q,n):
         """Predict answers over the passed data in batches.
