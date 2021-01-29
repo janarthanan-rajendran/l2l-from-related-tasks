@@ -62,6 +62,8 @@ tf.flags.DEFINE_boolean('copy_qnet2gqnet', False, 'if True copy qnet to gated qn
 tf.flags.DEFINE_boolean('separate_eval', False, 'if True split eval data from primary')
 tf.flags.DEFINE_boolean('r1', False, 'if True second related task')
 tf.flags.DEFINE_string("r1_data_dir", "../data/personalized-dialog-dataset/small-r1-10", "Directory containing r1 related tasks")
+tf.flags.DEFINE_string("gate_nonlin", None, "nonlinearity at the end gated qnet")
+
 
 FLAGS = tf.flags.FLAGS
 print("Started Task :)) :", FLAGS.task_id)
@@ -267,7 +269,7 @@ class chatBot(object):
                                   inner_lr=self.aux_learning_rate, aux_opt_name=self.aux_opt, alpha=self.alpha,
                                   epsilon=self.epsilon, aux_nonlin=self.aux_nonlin, m_series=self.m_series,
                                   r_candidates_vec=self.r_candidates_vec, outer_r_weight=self.outer_r_weight,
-                                  qnet_hops = FLAGS.qnet_hops)
+                                  qnet_hops = FLAGS.qnet_hops, gate_nonlin=FLAGS.gate_nonlin)
 
         self.saver = tf.train.Saver(max_to_keep=50)
         

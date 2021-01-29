@@ -31,7 +31,8 @@ class MemN2NDialog(object):
                  m_series=False,
                  r_candidates_vec=None,
                  outer_r_weight=0,
-                 qnet_hops=3):
+                 qnet_hops=3,
+                 gate_nonlin=None):
         """Creates an End-To-End Memory Network
 
         Args:
@@ -122,6 +123,7 @@ class MemN2NDialog(object):
         self._r_gated_opt = tf.train.AdamOptimizer(learning_rate=1e-3, name='r_gated_opt')
         self._gated_outer_opt = tf.train.AdamOptimizer(learning_rate=1e-3, name='gated_outer_opt')
         self._outer_r_weight = outer_r_weight
+        self._gate_nonlin = gate_nonlin
 
         # if self._has_qnet:
         #     self._shared_context_w = True
@@ -720,7 +722,12 @@ class MemN2NDialog(object):
 
                     q_u.append(q_u_k)
 
-                gate_weight = tf.nn.sigmoid(tf.add(tf.matmul(q_u_k, weights['gated_q_W']), weights['gated_q_B']))
+                gate_weight_pre = tf.add(tf.matmul(q_u_k, weights['gated_q_W']), weights['gated_q_B'])
+                if self._gate_nonlin == 'tanh':
+                    gate_weight = tf.nn.tanh(gate_weight_pre)
+                    print("using tanh for gated_qnet")
+                else:
+                    gate_weight = tf.nn.sigmoid(gate_weight_pre)
 
         return gate_weight
 
