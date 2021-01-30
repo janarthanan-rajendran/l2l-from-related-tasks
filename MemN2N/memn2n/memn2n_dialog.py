@@ -32,7 +32,9 @@ class MemN2NDialog(object):
                  r_candidates_vec=None,
                  outer_r_weight=0,
                  qnet_hops=3,
-                 gate_nonlin=None):
+                 gate_nonlin=None,
+                 inner_steps = 1,
+                 r_candidates_size=None):
         """Creates an End-To-End Memory Network
 
         Args:
@@ -122,8 +124,12 @@ class MemN2NDialog(object):
         self._r_opt = tf.train.AdamOptimizer(learning_rate=1e-3, name='r_opt')
         self._r_gated_opt = tf.train.AdamOptimizer(learning_rate=1e-3, name='r_gated_opt')
         self._gated_outer_opt = tf.train.AdamOptimizer(learning_rate=1e-3, name='gated_outer_opt')
+        self._r_gated_opt_i = tf.train.AdamOptimizer(learning_rate=1e-3, name='r_gated_opt_i')
+        self._gated_outer_opt_i = tf.train.AdamOptimizer(learning_rate=1e-3, name='gated_outer_opt_i')
         self._outer_r_weight = outer_r_weight
         self._gate_nonlin = gate_nonlin
+        self._inner_steps = inner_steps
+        self._r_candidates_size = r_candidates_size
 
         # if self._has_qnet:
         #     self._shared_context_w = True
@@ -155,6 +161,8 @@ class MemN2NDialog(object):
             aux_mse = tf.reduce_mean(tf.reduce_sum(tf.square(ans_targ - u_k_aux),1))
             cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
                 logits=logits, labels=self._answers, name="cross_entropy")
+            # cross_entropy = tf.nn.softmax_cross_entropy_with_logits(
+            #     logits=logits, labels=tf.one_hot(self._answers, self._candidates_size, axis=-1), name="cross_entropy")
             cross_entropy_sum = tf.reduce_sum(cross_entropy, name="cross_entropy_sum")
 
             r_cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
@@ -171,6 +179,126 @@ class MemN2NDialog(object):
             qt_mse_loss = tf.losses.mean_squared_error(labels=u_k_aux, predictions=ans_targ)
             at_mse_loss = tf.losses.mean_squared_error(labels=ans_targ, predictions=u_k_aux)
 
+            #Multiple inner steps for gated qnet
+
+            # update anet with gated related task data
+            _, _, r_logits_0 = self._inference(weights, self._stories_list[0],self._queries_list[0])  # for m_series u_k_aux is same as u_k
+            r_cross_entropy_0 = tf.nn.sparse_softmax_cross_entropy_with_logits(
+                logits=r_logits_0, labels=self._answers_list[0], name="r_cross_entropy_0")
+            aux_gate_0 = self._gated_q_inference(weights, self._stories_list[0], self._queries_list[0])
+            r_gated_cross_entropy_0 = aux_gate_0 * r_cross_entropy_0
+            r_gated_cross_entropy_sum_0 = tf.reduce_sum(r_gated_cross_entropy_0, name="r_gated_cross_entropy_sum_0")
+            r_gated_loss_op_0 = r_gated_cross_entropy_sum_0
+
+            r_gated_grads_0 = tf.gradients(r_gated_loss_op_0, list(weights_anet.values()) + list(weights_anet_pred.values())
+                                           + list(weights_anet_qnet.values()) + list(weights_anet_pred_qnet.values()))
+            r_gated_grads_0 = [add_gradient_noise(g) for g in r_gated_grads_0]
+            r_gated_grads_0 = [tf.clip_by_norm(g, self._max_grad_norm) for g in r_gated_grads_0]
+
+            r_gated_grads_and_vars_0 = zip(r_gated_grads_0, list(weights_anet.values()) + list(weights_anet_pred.values())
+                                           + list(weights_anet_qnet.values()) + list(weights_anet_pred_qnet.values()))
+            r_gated_nil_grads_and_vars_0 = []
+            for g, v in r_gated_grads_and_vars_0:
+                if v.name in self._nil_vars:
+                    r_gated_nil_grads_and_vars_0.append((zero_nil_slot(g), v))
+                else:
+                    r_gated_nil_grads_and_vars_0.append((g, v))
+            r_gated_train_op_0 = self._r_gated_opt_i.apply_gradients(r_gated_nil_grads_and_vars_0, name="r_gated_train_op_0")
+
+            # simulate the auxiliary update for anet
+            gated_inner_grads_0 = tf.gradients(r_gated_loss_op_0,
+                                               list(weights_anet.values()) + list(weights_anet_pred.values())
+                                               + list(weights_anet_qnet.values()) + list(
+                                                   weights_anet_pred_qnet.values()))
+            gated_inner_grads_0 = [add_gradient_noise(g) for g in gated_inner_grads_0]
+            gated_inner_grads_0 = [tf.clip_by_norm(grad, self._max_grad_norm) for grad in gated_inner_grads_0]
+            gated_inner_nil_grads_0 = []
+            for g, v in zip(gated_inner_grads_0, list(weights_anet.values()) + list(weights_anet_pred.values())
+                                                 + list(weights_anet_qnet.values()) + list(weights_anet_pred_qnet.values())):
+                if v.name in self._nil_vars:
+                    gated_inner_nil_grads_0.append(zero_nil_slot(g))
+                else:
+                    gated_inner_nil_grads_0.append(g)
+
+            gated_fast_anet_weights_i = {}
+            gated_beta1_power_0, gated_beta2_power_0 = self._r_gated_opt_i._get_beta_accumulators()
+            m_i = {}
+            v_i = {}
+            for grad, var, var_name in zip(gated_inner_nil_grads_0,
+                                           (list(weights_anet.values()) + list(weights_anet_pred.values())
+                                            + list(weights_anet_qnet.values()) + list(weights_anet_pred_qnet.values())),
+                                           (list(weights_anet.keys()) + list(weights_anet_pred.keys()) + list(
+                                               weights_anet_qnet.keys()) + list(weights_anet_pred_qnet.keys()))):
+                # gated_fast_anet_weights[var_name] = var - self._inner_lr * grad
+                lr_ = self._inner_lr * tf.sqrt(1 - gated_beta2_power_0) / (1 - gated_beta1_power_0)
+                m_i[var_name], v_i[var_name] = self._r_gated_opt_i.get_slot(var, 'm'), self._r_gated_opt_i.get_slot(var, 'v')
+                # print('1: grad', grad, 'var_name', var_name, 'var', var, "m", m, "v", v)
+                m_i[var_name] = m_i[var_name] + (grad - m_i[var_name]) * (1 - 0.9)
+                v_i[var_name] = v_i[var_name] + (tf.square(grad) - v_i[var_name]) * (1 - 0.999)
+                gated_fast_anet_weights_i[var_name] = var - m_i[var_name] * lr_ / (tf.sqrt(v_i[var_name] + 1e-08))
+
+            for i in range(1, self._inner_steps):
+                _, _, r_logits_i = self._inference(gated_fast_anet_weights_i, self._stories_list[i], self._queries_list[i])  # for m_series u_k_aux is same as u_k
+                # r_cross_entropy_i = tf.nn.sparse_softmax_cross_entropy_with_logits(
+                #     logits=r_logits_i, labels=self._answers_list[i], name="r_cross_entropy_i")
+                r_cross_entropy_i = tf.nn.softmax_cross_entropy_with_logits(
+                    logits=r_logits_i, labels=tf.one_hot(self._answers_list[i], self._r_candidates_size, axis=-1), name="r_cross_entropy_i")
+                aux_gate_i = self._gated_q_inference(weights, self._stories_list[i], self._queries_list[i])
+                r_gated_cross_entropy_i = aux_gate_i * r_cross_entropy_i
+                r_gated_cross_entropy_sum_i = tf.reduce_sum(r_gated_cross_entropy_i, name="r_gated_cross_entropy_sum_i")
+                r_gated_loss_op_i = r_gated_cross_entropy_sum_i
+
+                # simulate the auxiliary update for anet
+                gated_inner_grads_i = tf.gradients(r_gated_loss_op_i, list(gated_fast_anet_weights_i.values()))
+                gated_inner_grads_i = [add_gradient_noise(g) for g in gated_inner_grads_i]
+                gated_inner_grads_i = [tf.clip_by_norm(grad, self._max_grad_norm) for grad in gated_inner_grads_i]
+                gated_inner_nil_grads_i = []
+                for g, v in zip(gated_inner_grads_i, list(gated_fast_anet_weights_i.values())):
+                    if v.name in self._nil_vars:
+                        gated_inner_nil_grads_i.append(zero_nil_slot(g))
+                    else:
+                        gated_inner_nil_grads_i.append(g)
+
+                # gated_beta1_power_i, gated_beta2_power_i = self._r_gated_opt_i._get_beta_accumulators()
+                for grad, var, var_name in zip(gated_inner_nil_grads_i, list(gated_fast_anet_weights_i.values()), list(gated_fast_anet_weights_i.keys())):
+                    # gated_fast_anet_weights[var_name] = var - self._inner_lr * grad
+                    # lr_ = self._inner_lr * tf.sqrt(1 - gated_beta2_power_i) / (1 - gated_beta1_power_i)
+                    lr_ = self._inner_lr * tf.sqrt(1 - gated_beta2_power_0*(0.999**i)) / (1 - (gated_beta1_power_0*(0.9**i)))
+                    # m, v = self._r_gated_opt_i.get_slot(var, 'm'), self._r_gated_opt_i.get_slot(var, 'v')
+                    # print('3: grad', grad, 'var_name', var_name, 'var',var, "m", m, "v", v)
+                    m_i[var_name] = m_i[var_name] + (grad - m_i[var_name]) * (1 - 0.9)
+                    v_i[var_name] = v_i[var_name] + (tf.square(grad) - v_i[var_name]) * (1 - 0.999)
+                    gated_fast_anet_weights_i[var_name] = var - m_i[var_name] * lr_ / (tf.sqrt(v_i[var_name] + 1e-08))
+
+            gated_outer_p_logits_i, _, _ = self._inference(gated_fast_anet_weights_i, self._p_stories, self._p_queries)
+            gated_outer_p_cross_entropy_i = tf.nn.sparse_softmax_cross_entropy_with_logits(
+                logits=gated_outer_p_logits_i, labels=self._p_answers, name="gated_outer_p_cross_entropy_i")
+            gated_outer_p_cross_entropy_sum_i = tf.reduce_sum(gated_outer_p_cross_entropy_i,
+                                                            name="gated_outer_p_cross_entropy_sum_i")
+            gated_outer_p_loss_op_i = gated_outer_p_cross_entropy_sum_i
+
+            _, _, gated_outer_r_logits_i = self._inference(gated_fast_anet_weights_i, self._stories, self._queries)
+            gated_outer_r_cross_entropy_i = tf.nn.sparse_softmax_cross_entropy_with_logits(
+                logits=gated_outer_r_logits_i, labels=self._answers, name="gated_outer_r_cross_entropy_i")
+            gated_outer_r_cross_entropy_sum_i = tf.reduce_sum(gated_outer_r_cross_entropy_i,
+                                                            name="gated_outer_r_cross_entropy_sum_i")
+            gated_outer_r_loss_op_i = gated_outer_r_cross_entropy_sum_i
+
+            gated_outer_loss_op_i = gated_outer_p_loss_op_i + self._outer_r_weight * gated_outer_r_loss_op_i
+
+            # Update qnet (gated)
+            gated_outer_grads_i = tf.gradients(gated_outer_loss_op_i, list(weights_gated_qnet.values()))
+            gated_outer_grads_and_vars_i = zip(gated_outer_grads_i, list(weights_gated_qnet.values()))
+            gated_outer_grads_and_vars_i = [(tf.clip_by_norm(g, self._max_grad_norm), v) for g, v in
+                                          gated_outer_grads_and_vars_i]
+            gated_outer_nil_grads_and_vars_i = []
+            for g, v in gated_outer_grads_and_vars_i:
+                if v.name in self._gated_q_nil_vars:
+                    gated_outer_nil_grads_and_vars_i.append((zero_nil_slot(g), v))
+                else:
+                    gated_outer_nil_grads_and_vars_i.append((g, v))
+            gated_outer_train_op_i = self._gated_outer_opt_i.apply_gradients(gated_outer_nil_grads_and_vars_i,
+                                                                         name="gated_outer_train_op_i")
         else:
             logits, _, _ = self._inference(weights, self._stories, self._queries)
             cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
@@ -303,6 +431,7 @@ class MemN2NDialog(object):
                 else:
                     r_gated_nil_grads_and_vars.append((g, v))
             r_gated_train_op = self._r_gated_opt.apply_gradients(r_gated_nil_grads_and_vars, name="r_gated_train_op")
+
 
             # simulate the auxiliary update for anet
             gated_inner_grads = tf.gradients(r_gated_loss_op, list(weights_anet.values()) + list(weights_anet_pred.values())
@@ -464,9 +593,14 @@ class MemN2NDialog(object):
             self.gated_outer_loss_op = gated_outer_loss_op
             self.gated_outer_train_op = gated_outer_train_op
 
+            self.gated_outer_loss_op_i = gated_outer_loss_op_i
+            self.gated_outer_train_op_i = gated_outer_train_op_i
+
             self.aux_gate = aux_gate
 
             self.gated_outer_predict_op = tf.argmax(gated_outer_p_logits, 1, name='gated_outer_predict_op')
+            self.gated_outer_predict_op_i = tf.argmax(gated_outer_p_logits_i, 1, name='gated_outer_predict_op_i')
+
 
             # self.check_op = tf.add_check_numerics_ops()
 
@@ -491,6 +625,14 @@ class MemN2NDialog(object):
             self._p_queries = tf.placeholder(
                 tf.int32, [None, self._sentence_size], name="p_queries")
             self._p_answers = tf.placeholder(tf.int32, [None], name="p_answers")
+
+            self._stories_list = tf.placeholder(
+                tf.int32, [self._inner_steps, None, None, self._sentence_size], name="stories_list")
+            self._queries_list = tf.placeholder(
+                tf.int32, [self._inner_steps, None, self._sentence_size], name="queries_list")
+            self._answers_list = tf.placeholder(tf.int32, [self._inner_steps, None], name="answers_list")
+            self._q_answers_list = tf.placeholder(
+                tf.int32, [self._inner_steps, None, self._sentence_size], name="q_answers_list")
 
     def _build_vars(self):
         """Define trainable variables"""
@@ -819,6 +961,30 @@ class MemN2NDialog(object):
 
         return outer_loss, aux_gate
 
+    def gated_q_batch_fit_list(self, stories_list, queries_list, answers_list, q_answers_list, stories, queries, answers, q_answers,
+                               p_stories=None, p_queries=None, p_answers=None):
+        """Runs the training algorithm over the passed batch
+
+        Args:
+            stories: Tensor (None, memory_size, sentence_size)
+            queries: Tensor (None, sentence_size)
+            answers: Tensor (None, vocab_size)
+            q_answers: Tensor (None, sentence_size)
+            p_*: Primary tasks stories, queries and answers
+
+        Returns:
+            loss: floating-point number, the loss computed for the batch
+        """
+
+        feed_dict = {self._stories_list: stories_list, self._queries_list: queries_list, self._answers_list: answers_list, self._q_answers_list: q_answers_list,
+                     self._stories: stories, self._queries: queries, self._answers: answers, self._q_answers: q_answers,
+                     self._p_stories: p_stories, self._p_queries: p_queries, self._p_answers: p_answers}
+        # outer_loss, _, _ = self._sess.run([self.gated_outer_loss_op, self.gated_outer_train_op, self.check_op], feed_dict=feed_dict)
+        outer_loss, _ = self._sess.run([self.gated_outer_loss_op_i, self.gated_outer_train_op_i], feed_dict=feed_dict)
+
+
+        return outer_loss
+
     def q_batch_fit_r(self, stories, queries, answers):
         """Runs the training algorithm over the passed batch
 
@@ -932,6 +1098,28 @@ class MemN2NDialog(object):
                      self._p_stories: p_stories, self._p_queries: p_queries}
 
         return self._sess.run(self.gated_outer_predict_op, feed_dict=feed_dict)
+
+    def predict_gated_outer_list(self, stories_list, queries_list, answers_list, q_answers_list, stories, queries, answers,
+                                 q_answers, p_stories=None, p_queries=None, p_answers=None):
+        """Runs the training algorithm over the passed batch
+
+        Args:
+            stories: Tensor (None, memory_size, sentence_size)
+            queries: Tensor (None, sentence_size)
+            answers: Tensor (None, vocab_size)
+            q_answers: Tensor (None, sentence_size)
+            p_*: Primary tasks stories, queries and answers
+
+        Returns:
+            loss: floating-point number, the loss computed for the batch
+        """
+
+        feed_dict = {self._stories_list: stories_list, self._queries_list: queries_list, self._answers_list: answers_list, self._q_answers_list: q_answers_list,
+                     self._stories: stories, self._queries: queries, self._answers: answers, self._q_answers: q_answers,
+                     self._p_stories: p_stories, self._p_queries: p_queries}
+        # outer_loss, _, _ = self._sess.run([self.gated_outer_loss_op, self.gated_outer_train_op, self.check_op], feed_dict=feed_dict)
+        return self._sess.run(self.gated_outer_predict_op_i, feed_dict=feed_dict)
+
 
     def copy_qnet2anet(self):
         self._sess.run(self.assign_qnet2anet_op)

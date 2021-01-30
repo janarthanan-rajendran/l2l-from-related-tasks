@@ -66,6 +66,8 @@ tf.flags.DEFINE_string("gate_nonlin", None, "nonlinearity at the end gated qnet"
 tf.flags.DEFINE_boolean('only_gated_qnet', False, 'if True update only gated qnet')
 tf.flags.DEFINE_boolean('only_gated_aux', False, 'if True update only anet with gated_aux')
 tf.flags.DEFINE_boolean('only_gated_aux_primary', False, 'if True update only anet with gated aux and with primary')
+tf.flags.DEFINE_integer("inner_steps", 1, "Number of inner loop steps")
+
 
 
 
@@ -273,7 +275,7 @@ class chatBot(object):
                                   inner_lr=self.aux_learning_rate, aux_opt_name=self.aux_opt, alpha=self.alpha,
                                   epsilon=self.epsilon, aux_nonlin=self.aux_nonlin, m_series=self.m_series,
                                   r_candidates_vec=self.r_candidates_vec, outer_r_weight=self.outer_r_weight,
-                                  qnet_hops = FLAGS.qnet_hops, gate_nonlin=FLAGS.gate_nonlin)
+                                  qnet_hops = FLAGS.qnet_hops, gate_nonlin=FLAGS.gate_nonlin, inner_steps=FLAGS.inner_steps, r_candidates_size=self.r_n_cand)
 
         self.saver = tf.train.Saver(max_to_keep=50)
         
@@ -514,35 +516,97 @@ class chatBot(object):
                         total_cost += cost_t_related + cost_t_primary
                         count += 1
                 elif FLAGS.only_gated_qnet:
-                    count = 0
-                    gate_r1 = 0
-                    for r_start, r_end in r_batches_r:
-                        count += 1
-                        if FLAGS.separate_eval:
-                            start, end = random.sample(r_batches_p, 1)[0]
-                        else:
-                            start, end = random.sample(batches, 1)[0]
-                        r_s_p = trainS[start:end]
-                        r_q_p = trainQ[start:end]
-                        r_a_p = trainA[start:end]
-                        r_q_a_p = trainqA[start:end]
+                    if FLAGS.inner_steps == 1:
+                        count = 0
+                        gate_r1 = 0
+                        gate_joint_r = 0
+                        for r_start, r_end in r_batches_r:
+                            count += 1
+                            if FLAGS.separate_eval:
+                                start, end = random.sample(r_batches_p, 1)[0]
+                            else:
+                                start, end = random.sample(batches, 1)[0]
+                            r_s_p = trainS[start:end]
+                            r_q_p = trainQ[start:end]
+                            r_a_p = trainA[start:end]
+                            r_q_a_p = trainqA[start:end]
 
-                        r_s = r_trainS[r_start:r_end]
-                        r_q = r_trainQ[r_start:r_end]
-                        r_a = r_trainA[r_start:r_end]
-                        r_q_a = r_trainqA[r_start:r_end]
+                            r_s = r_trainS[r_start:r_end]
+                            r_q = r_trainQ[r_start:r_end]
+                            r_a = r_trainA[r_start:r_end]
+                            r_q_a = r_trainqA[r_start:r_end]
 
-                        cost_t_outer, aux_gate = self.model.gated_q_batch_fit(r_s, r_q, r_a, r_q_a, r_s_p, r_q_p, r_a_p) #gated qnet update
-                        total_cost += cost_t_outer
+                            cost_t_outer, aux_gate = self.model.gated_q_batch_fit(r_s, r_q, r_a, r_q_a, r_s_p, r_q_p, r_a_p) #gated qnet update
+                            total_cost += cost_t_outer
 
-                        if r_start >= n_r_orig_train:
-                            gate_r1 += np.sum(aux_gate)
-                        if count % 100 == 0:
-                            print("count", count, "outer", cost_t_outer)
-                    print("Ratio of gate_r1/r1: ", gate_r1/n_r1_train)
+                            if r_start >= n_r_orig_train:
+                                gate_r1 += np.sum(aux_gate)
+                            gate_joint_r += np.sum(aux_gate)
+                            if count % 100 == 0:
+                                print("count", count, "outer", cost_t_outer)
+                        print("Ratio of gate_r1/r1: ", gate_r1/n_r1_train, "Ratio of gate_joint_r/joint_r", gate_joint_r/n_r_train)
+                    else:
+                        count = 0
+                        r_s_list = []
+                        r_q_list = []
+                        r_a_list = []
+                        r_q_a_list = []
+
+                        # r_s_list1 = np.zeros((FLAGS.inner_steps, ))
+
+                        for r_start, r_end in r_batches_r:
+                            count += 1
+
+                            r_s = r_trainS[r_start:r_end]
+                            r_q = r_trainQ[r_start:r_end]
+                            r_a = r_trainA[r_start:r_end]
+                            r_q_a = r_trainqA[r_start:r_end]
+
+                            r_s_list.append(r_s)
+                            # print(np.array(r_s).shape)
+                            r_q_list.append(r_q)
+                            r_a_list.append(r_a)
+                            r_q_a_list.append(r_q_a)
+
+                            if count % FLAGS.inner_steps == 0:
+                                if FLAGS.separate_eval:
+                                    start, end = random.sample(r_batches_p, 1)[0]
+                                else:
+                                    start, end = random.sample(batches, 1)[0]
+                                r_s_p = trainS[start:end]
+                                r_q_p = trainQ[start:end]
+                                r_a_p = trainA[start:end]
+                                r_q_a_p = trainqA[start:end]
+
+                                #used if outer_r_weight > 0
+                                r_start1, r_end1 = random.sample(r_batches_r, 1)[0]
+                                r_s1 = r_trainS[r_start1:r_end1]
+                                r_q1 = r_trainQ[r_start1:r_end1]
+                                r_a1 = r_trainA[r_start1:r_end1]
+                                r_q_a1 = r_trainqA[r_start1:r_end1]
+
+                                # print(np.asarray(r_s).shape, np.asarray(r_s_list).shape, np.asarray(r_q_list).shape, np.asarray(r_a_list).shape)
+                                cost_t_outer = self.model.gated_q_batch_fit_list(np.asarray(r_s_list), np.asarray(r_q_list),
+                                                                                           np.asarray(r_a_list), np.asarray(r_q_a_list),
+                                                                                           r_s1, r_q1, r_a1, r_q_a1, r_s_p, r_q_p, r_a_p)  # gated qnet update
+                                # print(np.asarray(r_s_list).shape, np.asarray(r_q_list).shape, np.asarray(r_a_list).shape)
+                                # cost_t_outer = self.model.gated_q_batch_fit_list(r_s_list, r_q_list,
+                                #                                                            r_a_list, r_q_a_list,
+                                #                                                            r_s1, r_q1, r_a1, r_q_a1, r_s_p, r_q_p, r_a_p)  # gated qnet update
+                                total_cost += cost_t_outer
+
+                                r_s_list = []
+                                r_q_list = []
+                                r_a_list = []
+                                r_q_a_list = []
+
+                            if count % 100 == 0:
+                                print("count", count, "outer", cost_t_outer)
+
                 elif FLAGS.only_gated_aux:
                     count = 0
                     gate_r1 = 0
+                    gate_joint_r = 0
                     for r_start, r_end in r_batches_r:
                         count += 1
                         r_s = r_trainS[r_start:r_end]
@@ -554,13 +618,16 @@ class chatBot(object):
                         total_cost += cost_t_aux
                         if r_start >= n_r_orig_train:
                             gate_r1 += np.sum(aux_gate)
+                        gate_joint_r += np.sum(aux_gate)
                         if count % 100 == 0:
                             print("count", count, "aux", cost_t_aux)
                             # print("Aux_gate", aux_gate)
-                    print("Ratio of gate_r1/r1: ", gate_r1/n_r1_train)
+                    print("Ratio of gate_r1/r1: ", gate_r1/n_r1_train, "Ratio of gate_joint_r/joint_r", gate_joint_r/n_r_train)
 
                 elif FLAGS.only_gated_aux_primary:
                     count = 0
+                    gate_r1 = 0
+                    gate_joint_r = 0
                     for r_start, r_end in r_batches_r:
                         count += 1
                         r_s = r_trainS[r_start:r_end]
@@ -569,6 +636,9 @@ class chatBot(object):
                         r_q_a = r_trainqA[r_start:r_end]
 
                         cost_t_aux, aux_gate = self.model.gated_batch_fit(r_s, r_q, r_a) #anet with aux update with related data
+                        if r_start >= n_r_orig_train:
+                            gate_r1 += np.sum(aux_gate)
+                        gate_joint_r += np.sum(aux_gate)
 
                         if FLAGS.separate_eval:
                             start, end = random.sample(p_batches, 1)[0]
@@ -584,6 +654,7 @@ class chatBot(object):
                         if count % 100 == 0:
                             print("count", count, "aux", cost_t_aux, "primary", cost_t_primary)
                             # print("Aux_gate", aux_gate)
+                    print("Ratio of gate_r1/r1: ", gate_r1/n_r1_train, "Ratio of gate_joint_r/joint_r", gate_joint_r/n_r_train)
                 elif self.gated_qnet:
                     count = 0
                     for r_start, r_end in r_batches_r:
@@ -831,26 +902,74 @@ class chatBot(object):
         Returns:
             preds: Tensor (None, vocab_size)
         """
+        if FLAGS.inner_steps == 1:
+            preds = []
+            ans = []
+            for start in range(0, r_n, self.batch_size):
+                end = start + self.batch_size
+                for start_p in range(0, n, self.batch_size):
+                    end_p = start_p + self.batch_size
+                    r_s_p = S[start_p:end_p]
+                    r_q_p = Q[start_p:end_p]
+                    r_a_p = A[start_p:end_p]
+                    # r_q_a_p = trainqA[start_p:end_p]
 
-        preds = []
-        ans = []
-        for start in range(0, r_n, self.batch_size):
-            end = start + self.batch_size
-            for start_p in range(0, n, self.batch_size):
-                end_p = start_p + self.batch_size
-                r_s_p = S[start_p:end_p]
-                r_q_p = Q[start_p:end_p]
-                r_a_p = A[start_p:end_p]
-                # r_q_a_p = trainqA[start_p:end_p]
+                    r_s = r_S[start:end]
+                    r_q = r_Q[start:end]
+                    r_a = r_A[start:end]
+                    r_q_a = r_qA[start:end]
 
-                r_s = r_S[start:end]
-                r_q = r_Q[start:end]
-                r_a = r_A[start:end]
-                r_q_a = r_qA[start:end]
+                    pred = self.model.predict_gated_outer(r_s, r_q, r_a, r_q_a, r_s_p, r_q_p)  # gated qnet update
+                    preds += list(pred)
+                    ans += list(r_a_p)
+        else:
+            preds = []
+            ans = []
 
-                pred = self.model.predict_gated_outer(r_s, r_q, r_a, r_q_a, r_s_p, r_q_p)  # gated qnet update
-                preds += list(pred)
-                ans += list(r_a_p)
+            r_s_list = []
+            r_q_list = []
+            r_a_list = []
+            r_q_a_list = []
+            count  = 0
+            for r_start in range(0, r_n, self.batch_size):
+                count += 1
+                r_end = r_start + self.batch_size
+
+                r_s = r_S[r_start:r_end]
+                r_q = r_Q[r_start:r_end]
+                r_a = r_A[r_start:r_end]
+                r_q_a = r_qA[r_start:r_end]
+
+                r_s_list.append(r_s)
+                r_q_list.append(r_q)
+                r_a_list.append(r_a)
+                r_q_a_list.append(r_q_a)
+
+                if count % FLAGS.inner_steps == 0:
+                    for start in range(0,n,self.batch_size):
+                        end = start + self.batch_size
+                        r_s_p = S[start:end]
+                        r_q_p = Q[start:end]
+                        r_a_p = A[start:end]
+
+                        # used if outer_r_weight > 0
+                        r_start1 = random.sample(range(0, r_n, self.batch_size),1)[0]
+                        r_end1 = r_start1 + self.batch_size
+                        r_s1 = r_S[r_start1:r_end1]
+                        r_q1 = r_Q[r_start1:r_end1]
+                        r_a1 = r_A[r_start1:r_end1]
+                        r_q_a1 = r_qA[r_start1:r_end1]
+
+                        pred = self.model.predict_gated_outer_list(np.asarray(r_s_list), np.asarray(r_q_list), np.asarray(r_a_list),
+                                                                           np.asarray(r_q_a_list), r_s1, r_q1, r_a1, r_q_a1, r_s_p, r_q_p, r_a_p)  # gated qnet update
+                        preds += list(pred)
+                        ans += list(r_a_p)
+
+
+                    r_s_list = []
+                    r_q_list = []
+                    r_a_list = []
+                    r_q_a_list = []
 
         return preds, ans
 
